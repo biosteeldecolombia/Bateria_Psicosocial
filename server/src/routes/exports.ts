@@ -38,7 +38,9 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
         .limit(1);
       u = rows[0]?.u;
     }
-    if (!u) return {};
+    if (!u) {
+      throw Object.assign(new Error('La empresa no tiene una psicóloga activa asignada. Asígnale una en Usuarios para que sus datos queden en el consentimiento y en el expediente.'), { statusCode: 409 });
+    }
     if (!u.professionalDocumentEnc || !u.professionalRegistryEnc) {
       throw Object.assign(new Error('La psicóloga responsable debe completar su documento y su registro profesional en «Mi perfil» antes de generar el expediente (aparecen en el consentimiento).'), { statusCode: 409 });
     }
@@ -46,6 +48,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       name: crypto.decrypt(u.fullNameEnc),
       document: u.professionalDocumentEnc ? crypto.decrypt(u.professionalDocumentEnc) : undefined,
       registry: u.professionalRegistryEnc ? crypto.decrypt(u.professionalRegistryEnc) : undefined,
+      signed: u.id === actor.id,
     };
   }
 

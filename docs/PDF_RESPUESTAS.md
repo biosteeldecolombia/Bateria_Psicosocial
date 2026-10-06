@@ -33,3 +33,9 @@ Cada persona tiene un **expediente en PDF con el aspecto de las plantillas ofici
 - «Nombres» y «Apellidos» del consentimiento se separan con una regla simple (la primera mitad del nombre completo) porque la aplicación recoge un solo campo. Mejora recomendada: pedirlos por separado al identificarse.
 - PDF combinado en un único archivo y nombre de archivo pseudonimizado configurable.
 - Informe individual en Word (el libro trae formatos Word de informes).
+
+## Datos de la psicóloga en el PDF
+
+- Consentimiento: nombre, documento y registro profesional en la declaración del profesional responsable. La línea de firma lleva una constancia de firma electrónica **solo cuando quien genera el PDF es esa misma psicóloga** (sesión con MFA); si lo genera el administrador, la línea queda para firma manual.
+- Todas las páginas del expediente (consentimiento, ficha y cuestionarios) llevan al pie «Profesional responsable · Documento · Registro profesional».
+- Si la empresa no tiene una psicóloga activa asignada, o su perfil está incompleto, el PDF no se genera y se indica qué falta.

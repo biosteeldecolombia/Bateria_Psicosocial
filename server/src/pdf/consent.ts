@@ -13,7 +13,9 @@ export interface ConsentPdfInput {
   textHash: string;
   revokedAt?: Date | null;
   /** Datos del profesional responsable (perfil de la psicóloga). Si faltan, los renglones quedan en blanco. */
-  professional?: { name?: string; document?: string; registry?: string };
+  professional?: { name?: string; document?: string; registry?: string; signed?: boolean };
+  /** Fecha y hora de la constancia de firma del profesional (cuando `professional.signed`). */
+  signedAt?: Date;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -66,6 +68,11 @@ export async function consentInto(doc: PDFDocument, inp: ConsentPdfInput): Promi
   if (pr?.name) fit(p2, font, pr.name, 83, 530.5, 262);
   if (pr?.document) fit(p2, font, pr.document, 160, 622.5, 140);
   if (pr?.registry) fit(p2, font, pr.registry, 161, 634, 145);
+  // Constancia de firma electrónica: solo si quien genera el documento es la propia profesional autenticada
+  if (pr?.signed && pr.name) {
+    const at = inp.signedAt ?? new Date();
+    fit(p2, font, `Firmado electrónicamente · ${dmy(at)} ${hm(at)}`, 222, 607.5, 228, 9);
+  }
 }
 
 export async function consentPdf(inp: ConsentPdfInput): Promise<PDFDocument> {

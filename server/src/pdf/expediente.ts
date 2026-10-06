@@ -1,6 +1,6 @@
 import { inArray } from 'drizzle-orm';
 import { nameParts } from '../results/names.js';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from 'pdf-lib';
 import type { FichaAnswers, QuestionnaireId } from '@sanithelp/shared';
 import type { Db } from '../db/client.js';
 import { consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
@@ -59,6 +59,8 @@ export interface Professional {
   name?: string;
   document?: string;
   registry?: string;
+  /** La profesional genera el documento con su sesión: se imprime la constancia de firma electrónica. */
+  signed?: boolean;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -71,7 +73,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export async function buildExpediente(e: ExpedienteData, professional: Professional, generatedAt: Date): Promise<Uint8Array> {
   const out = await PDFDocument.create();
   if (e.consent) {
-    await consentInto(out, { names: e.names, surnames: e.surnames, document: e.document, decision: e.consent.decision, decidedAt: e.consent.decidedAt, version: e.consent.version, textHash: e.consent.textHash, revokedAt: e.consent.revokedAt, professional });
+    await consentInto(out, { names: e.names, surnames: e.surnames, document: e.document, decision: e.consent.decision, decidedAt: e.consent.decidedAt, version: e.consent.version, textHash: e.consent.textHash, revokedAt: e.consent.revokedAt, professional, signedAt: generatedAt });
   }
   if (e.consent?.decision === 'authorized') {
     if (e.ficha) await fichaInto(out, { data: e.ficha.data, date: e.ficha.date, document: e.document });
@@ -80,8 +82,17 @@ export async function buildExpediente(e: ExpedienteData, professional: Professio
   // Pie de confidencialidad en todas las páginas
   const font = await out.embedFont(StandardFonts.Helvetica);
   const stamp = `Confidencial — uso exclusivo del profesional responsable · Generado el ${pad(generatedAt.getDate())}/${pad(generatedAt.getMonth() + 1)}/${generatedAt.getFullYear()} ${pad(generatedAt.getHours())}:${pad(generatedAt.getMinutes())}`;
+  const pro = [professional.name && `Profesional responsable: ${professional.name}`, professional.document && `Documento: ${professional.document}`, professional.registry && `Registro profesional: ${professional.registry}`].filter(Boolean).join(' · ');
+  const label = (pg: PDFPage, text: string, y: number) => {
+    const w = font.widthOfTextAtSize(text, 7);
+    const x = (pg.getWidth() - w) / 2;
+    // Fondo blanco para que se lea sobre la franja de color de las plantillas
+    pg.drawRectangle({ x: x - 4, y: y - 2.5, width: w + 8, height: 10.5, color: rgb(1, 1, 1), opacity: 0.92 });
+    pg.drawText(text, { x, y, size: 7, font, color: rgb(0.2, 0.2, 0.28) });
+  };
   for (const pg of out.getPages()) {
-    pg.drawText(stamp, { x: (pg.getWidth() - font.widthOfTextAtSize(stamp, 7)) / 2, y: 8, size: 7, font, color: rgb(0.45, 0.45, 0.5) });
+    if (pro) label(pg, pro, 19);
+    label(pg, stamp, 7);
   }
   out.setTitle('Expediente de respuestas — Batería de riesgo psicosocial');
   out.setProducer('Sanithelp');
