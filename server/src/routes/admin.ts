@@ -68,6 +68,60 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(201).send({ id: row!.id, username: input.username, password });
   });
 
+  /** Cuentas de personas (no incluye las credenciales compartidas de colaboradores), con sus empresas asignadas. Solo administrador. */
+  app.get('/admin/users', { preHandler: app.requireReady('admin') }, async () => {
+    const rows = await db.select().from(users).where(inArray(users.role, ['admin', 'psychologist', 'company'])).orderBy(users.createdAt);
+    const cos = await db.select({ id: companies.id, name: companies.name, code: companies.code }).from(companies);
+    const coById = new Map(cos.map((c) => [c.id, c]));
+    const links = await db.select().from(psychologistCompanies);
+    const safe = (enc: string | null) => {
+      if (!enc) return '';
+      try {
+        return crypto.decrypt(enc);
+      } catch {
+        return '';
+      }
+    };
+    return rows.map((u) => {
+      const ids = u.role === 'psychologist' ? links.filter((l) => l.userId === u.id).map((l) => l.companyId) : u.companyId ? [u.companyId] : [];
+      return {
+        id: u.id,
+        role: u.role,
+        username: safe(u.usernameEnc),
+        fullName: safe(u.fullNameEnc),
+        professionalRegistry: safe(u.professionalRegistryEnc),
+        professionalDocument: safe(u.professionalDocumentEnc),
+        active: u.active,
+        mfaRequired: MFA_ROLES.includes(u.role),
+        mfaEnabled: u.mfaEnabled,
+        locked: !!u.lockedUntil && u.lockedUntil > new Date(),
+        createdAt: u.createdAt,
+        lastLoginAt: u.lastLoginAt,
+        companies: ids.map((id) => coById.get(id)).filter((c): c is NonNullable<typeof c> => !!c),
+      };
+    });
+  });
+
+  /** Reemplaza las empresas que atiende una psicóloga. Solo administrador. */
+  app.put('/admin/users/:id/companies', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const ids = (req.body as { companyIds?: unknown })?.companyIds;
+    if (!uuidParam(id) || !Array.isArray(ids) || !ids.every(uuidParam)) return reply.code(400).send({ error: 'Datos inválidos' });
+    const [target] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target || target.role !== 'psychologist') return reply.code(404).send({ error: 'Psicóloga no encontrada' });
+    const unique = [...new Set(ids as string[])];
+    if (unique.length) {
+      const found = await db.select({ id: companies.id }).from(companies).where(inArray(companies.id, unique));
+      if (found.length !== unique.length) return reply.code(400).send({ error: 'Empresa inexistente.' });
+    }
+    await db.transaction(async (tx) => {
+      await tx.delete(psychologistCompanies).where(eq(psychologistCompanies.userId, id));
+      if (unique.length) await tx.insert(psychologistCompanies).values(unique.map((companyId) => ({ userId: id, companyId })));
+    });
+    await audit(db, req.auth!.user.id, 'user.companies_updated', { type: 'user', id }, { count: unique.length });
+    return { ok: true };
+  });
+
   /** Restablece la contraseña de una cuenta de persona y cierra sus sesiones. Solo administrador. */
   app.post('/admin/users/:id/reset-password', { preHandler: app.requireReady('admin') }, async (req, reply) => {
     const { id } = req.params as { id: string };

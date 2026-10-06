@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { MeResponse } from '@sanithelp/shared';
 import { api, ApiError } from './api';
 import { Analysis } from './analysis/Analysis';
+import { Users } from './Users';
 
 interface Company { id: string; name: string; code: string }
 interface Campaign { id: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null }
@@ -79,6 +80,7 @@ export function Management({ me }: { me: MeResponse }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [secret, setSecret] = useState<Secret | null>(null);
   const [analysis, setAnalysis] = useState<Campaign | null>(null);
+  const [view, setView] = useState<'gestion' | 'usuarios'>('gestion');
   const act = useAction();
 
   const [companyId, setCompanyId] = useState('');
@@ -148,8 +150,23 @@ export function Management({ me }: { me: MeResponse }) {
         {secret && <SecretBox s={secret} onClose={() => setSecret(null)} />}
       </section>
 
+      {isAdmin && (
+        <div role="tablist" aria-label="Secciones de administración" className="tabs">
+          {([['gestion', 'Gestión'], ['usuarios', 'Usuarios']] as const).map(([k, label]) => (
+            <button key={k} role="tab" id={`mtab-${k}`} aria-selected={view === k} aria-controls={`mpanel-${k}`} tabIndex={view === k ? 0 : -1} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{label}</button>
+          ))}
+        </div>
+      )}
+
+      {isAdmin && view === 'usuarios' && (
+        <div role="tabpanel" id="mpanel-usuarios" aria-labelledby="mtab-usuarios">
+          <Users companies={companies} onSecret={(title, username, password) => setSecret({ title, username, password })} />
+        </div>
+      )}
+
       {me.role === 'psychologist' && <ProfileCard />}
 
+      {!(isAdmin && view === 'usuarios') && <>
       <section className="card" aria-labelledby="c1" style={{ marginTop: '1rem' }}>
         <h2 id="c1">Nueva campaña (ronda de aplicación)</h2>
         {companies.length === 0 ? (
@@ -259,6 +276,7 @@ export function Management({ me }: { me: MeResponse }) {
           </section>
         </>
       )}
+      </>}
     </>
   );
 }
