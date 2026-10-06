@@ -49,7 +49,10 @@ export function Users({ companies, onSecret }: { companies: Company[]; onSecret:
   const [roleFilter, setRoleFilter] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState<string[]>([]);
+  const [form, setForm] = useState({ fullName: '', username: '', role: 'psychologist' as UserRow['role'], registry: '', document: '', companyIds: [] as string[] });
+  const [pwdFor, setPwdFor] = useState<string | null>(null);
+  const [pwd, setPwd] = useState('');
+  const [show, setShow] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -148,25 +151,91 @@ export function Users({ companies, onSecret }: { companies: Company[]; onSecret:
                         )}
                         <p><strong>Permisos del rol {ROLE_LABEL[u.role]}:</strong></p>
                         <ul>{PERMISSIONS[u.role].map((p) => <li key={p}>{p}</li>)}</ul>
-                        {u.role === 'psychologist' && (
-                          editing === u.id ? (
-                            <fieldset style={{ border: 0, padding: 0, margin: '0.5rem 0' }}>
-                              <legend style={{ fontWeight: 700 }}>Empresas que atiende</legend>
-                              {companies.map((c) => (
-                                <label className="check" key={c.id}>
-                                  <input type="checkbox" checked={draft.includes(c.id)} onChange={(e) => setDraft(e.target.checked ? [...draft, c.id] : draft.filter((x) => x !== c.id))} /> {c.name}
-                                </label>
-                              ))}
-                              <button className="btn" disabled={busy} onClick={() => run(async () => {
-                                await api('PUT', `/api/admin/users/${u.id}/companies`, { companyIds: draft });
+                        {editing === u.id ? (
+                          <form
+                            noValidate
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void run(async () => {
+                                await api('PUT', `/api/admin/users/${u.id}`, {
+                                  fullName: form.fullName,
+                                  username: form.username,
+                                  role: form.role,
+                                  ...(form.role === 'company' ? { companyId: form.companyIds[0] } : {}),
+                                  ...(form.role === 'psychologist' ? { assignedCompanyIds: form.companyIds, professionalRegistry: form.registry, professionalDocument: form.document } : {}),
+                                });
                                 setEditing(null);
                                 await load();
-                              })}>Guardar empresas</button>{' '}
-                              <button className="btn secondary" onClick={() => setEditing(null)}>Cancelar</button>
-                            </fieldset>
-                          ) : (
-                            <button className="btn secondary" onClick={() => { setDraft(u.companies.map((c) => c.id)); setEditing(u.id); }}>Editar empresas asignadas</button>
-                          )
+                              });
+                            }}
+                          >
+                            <label htmlFor={`en-${u.id}`}>Nombre completo</label>
+                            <input id={`en-${u.id}`} type="text" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
+                            <label htmlFor={`eu-${u.id}`}>Usuario (correo)</label>
+                            <input id={`eu-${u.id}`} type="email" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
+                            <label htmlFor={`er-${u.id}`}>Rol y permisos</label>
+                            <select id={`er-${u.id}`} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as UserRow['role'], companyIds: [] })}>
+                              <option value="admin">Administrador</option>
+                              <option value="psychologist">Psicóloga</option>
+                              <option value="company">Empresa cliente (solo reportes)</option>
+                            </select>
+                            <ul>{PERMISSIONS[form.role].map((p) => <li key={p}>{p}</li>)}</ul>
+                            {form.role === 'psychologist' && (
+                              <>
+                                <label htmlFor={`ed-${u.id}`}>N.° de identificación de la profesional</label>
+                                <input id={`ed-${u.id}`} type="text" value={form.document} onChange={(e) => setForm({ ...form, document: e.target.value })} />
+                                <label htmlFor={`eg-${u.id}`}>Registro / licencia profesional</label>
+                                <input id={`eg-${u.id}`} type="text" value={form.registry} onChange={(e) => setForm({ ...form, registry: e.target.value })} />
+                              </>
+                            )}
+                            {form.role !== 'admin' && (
+                              <fieldset style={{ border: 0, padding: 0, margin: '1rem 0 0' }}>
+                                <legend style={{ fontWeight: 700 }}>{form.role === 'psychologist' ? 'Empresas que atiende' : 'Empresa'}</legend>
+                                {companies.map((c) => (
+                                  <label className="check" key={c.id}>
+                                    <input
+                                      type={form.role === 'company' ? 'radio' : 'checkbox'}
+                                      name={`eco-${u.id}`}
+                                      checked={form.companyIds.includes(c.id)}
+                                      onChange={(e) => setForm({ ...form, companyIds: form.role === 'company' ? [c.id] : e.target.checked ? [...form.companyIds, c.id] : form.companyIds.filter((x) => x !== c.id) })}
+                                    /> {c.name}
+                                  </label>
+                                ))}
+                              </fieldset>
+                            )}
+                            <p className="muted">Si cambias el rol o el usuario, se cerrarán las sesiones abiertas de esa cuenta.</p>
+                            <button className="btn" disabled={busy || form.fullName.trim().length < 2 || form.username.trim().length < 3 || (form.role === 'company' && !form.companyIds.length)}>Guardar cambios</button>{' '}
+                            <button type="button" className="btn secondary" onClick={() => setEditing(null)}>Cancelar</button>
+                          </form>
+                        ) : (
+                          <button className="btn secondary" onClick={() => {
+                            setForm({ fullName: u.fullName, username: u.username, role: u.role, registry: u.professionalRegistry, document: u.professionalDocument, companyIds: u.companies.map((c) => c.id) });
+                            setEditing(u.id);
+                          }}>Editar datos, rol y empresas</button>
+                        )}
+                        {pwdFor === u.id ? (
+                          <form
+                            noValidate
+                            style={{ marginTop: '1rem' }}
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void run(async () => {
+                                await api('POST', `/api/admin/users/${u.id}/reset-password`, { password: pwd });
+                                onSecret(`Contraseña definida para ${u.fullName || u.username}`, u.username, pwd);
+                                setPwd('');
+                                setPwdFor(null);
+                              });
+                            }}
+                          >
+                            <label htmlFor={`pw-${u.id}`}>Nueva contraseña (la defines tú)</label>
+                            <input id={`pw-${u.id}`} type={show ? 'text' : 'password'} autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
+                            <label className="check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Mostrar contraseña</label>
+                            <p className="muted">Mínimo 12 caracteres, sin palabras comunes ni el nombre o correo de la persona. Se cerrarán sus sesiones.</p>
+                            <button className="btn" disabled={busy || pwd.length < 12}>Guardar contraseña</button>{' '}
+                            <button type="button" className="btn secondary" onClick={() => { setPwd(''); setPwdFor(null); }}>Cancelar</button>
+                          </form>
+                        ) : (
+                          <button className="btn secondary" style={{ marginTop: '1rem' }} onClick={() => { setPwd(''); setPwdFor(u.id); }}>Definir contraseña manualmente</button>
                         )}
                       </td>
                     </tr>

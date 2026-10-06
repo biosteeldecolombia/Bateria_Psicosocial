@@ -87,6 +87,17 @@ export const createUserSchema = z.object({
   professionalDocument: z.string().trim().max(40).optional(),
 });
 
+/** Edición de una cuenta de persona: todos los campos son opcionales. */
+export const updateUserSchema = z.object({
+  role: z.enum(['admin', 'psychologist', 'company']).optional(),
+  username: z.string().trim().min(3).max(200).optional(),
+  fullName: z.string().trim().min(2).max(200).optional(),
+  companyId: z.string().uuid().optional(),
+  assignedCompanyIds: z.array(z.string().uuid()).optional(),
+  professionalRegistry: z.string().trim().max(100).optional(),
+  professionalDocument: z.string().trim().max(40).optional(),
+});
+
 export const createCampaignSchema = z.object({
   companyId: z.string().uuid(),
   name: z.string().trim().min(2).max(200),
