@@ -44,14 +44,23 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
         : ids.length
           ? await db.select().from(campaigns).where(inArray(campaigns.companyId, ids)).orderBy(desc(campaigns.createdAt))
           : [];
-    const counts = new Map(
-      (await db.select({ id: participants.campaignId, n: sql<number>`count(*)::int` }).from(participants).groupBy(participants.campaignId)).map((r) => [r.id, r.n]),
-    );
+    // Totales por campaña y estado (sin abrir los resultados): iniciaron, completaron, en curso, no autorizaron, revocaron.
+    const stats = new Map<string, { started: number; completed: number; inProgress: number; declined: number; revoked: number }>();
+    for (const r of await db.select({ id: participants.campaignId, status: participants.status, n: sql<number>`count(*)::int` }).from(participants).groupBy(participants.campaignId, participants.status)) {
+      const s = stats.get(r.id) ?? { started: 0, completed: 0, inProgress: 0, declined: 0, revoked: 0 };
+      s.started += r.n;
+      if (r.status === 'completed') s.completed += r.n;
+      else if (r.status === 'in_progress') s.inProgress += r.n;
+      else if (r.status === 'declined') s.declined += r.n;
+      else if (r.status === 'revoked') s.revoked += r.n;
+      stats.set(r.id, s);
+    }
     const names = new Map((await db.select({ id: companies.id, name: companies.name }).from(companies)).map((c) => [c.id, c.name]));
     const out = [];
     for (const c of rows) {
       const u = await accessUserOf(c.id);
-      out.push({ ...c, participantCount: counts.get(c.id) ?? 0, companyName: names.get(c.companyId) ?? '', accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
+      const st = stats.get(c.id) ?? { started: 0, completed: 0, inProgress: 0, declined: 0, revoked: 0 };
+      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
     }
     return out;
   });

@@ -7,7 +7,17 @@ import { EmptyState, Modal, RowMenu, SecretModal, StatusBadge, useAction, type S
 import { Users, type UserRow } from './Users';
 
 interface Company { id: string; name: string; code: string; nit: string | null; minGroupSize: number; active: boolean }
-interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; createdAt: string; participantCount: number }
+interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; createdAt: string; participantCount: number; stats: { started: number; completed: number; inProgress: number; declined: number; revoked: number } }
+
+/** Totales de respuestas de una campaña, visibles sin abrir los resultados. */
+function CampaignStats({ s }: { s: Campaign['stats'] }) {
+  const items: [number, string][] = [[s.started, 'con acceso iniciado'], [s.completed, 'completaron'], [s.inProgress, 'en curso'], [s.declined, 'no autorizaron']];
+  return (
+    <ul className="mini-kpis" aria-label="Totales de respuestas">
+      {items.map(([n, label]) => <li key={label}><strong>{n}</strong> {label}</li>)}
+    </ul>
+  );
+}
 
 type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'perfil';
 
@@ -337,7 +347,7 @@ export function Management({ me }: { me: MeResponse }) {
                     {campaigns.slice(0, 6).map((c) => (
                       <li key={c.id}>
                         <button className="list-item" onClick={() => { setTab('campanas'); setAnalysis(c); }}>
-                          <span><strong>{c.name}</strong><br /><span className="muted">{c.companyName}</span></span>
+                          <span><strong>{c.name}</strong><br /><span className="muted">{c.companyName}</span><CampaignStats s={c.stats} /></span>
                           <StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" />
                         </button>
                       </li>
@@ -463,13 +473,14 @@ export function Management({ me }: { me: MeResponse }) {
               <div className="panel table-wrap">
                 <table className="table">
                   <caption className="sr-only">Campañas y su credencial de acceso</caption>
-                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Usuario de acceso</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Usuario de acceso</th><th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
                   <tbody>
                     {shownCampaigns.map((c) => (
                       <tr key={c.id}>
                         <td>{c.companyName}</td>
                         <td><strong>{c.name}</strong></td>
                         <td><code>{c.accessUsername}</code></td>
+                        <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
                         <td className="actions">
                           <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> Resultados</button>
