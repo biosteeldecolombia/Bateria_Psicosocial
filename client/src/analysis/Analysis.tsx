@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, getCsrf } from '../api';
 import { BulkExport, downloadFile } from './BulkExport';
+import { Icon, type IconName } from '../icons';
 
 /** Niveles con color Y texto Y símbolo (nunca solo color). */
-const LEVEL_ICON = ['✔', '◔', '◑', '▲', '⬢'];
+const LEVEL_ICON: IconName[] = ['check', 'circle', 'half', 'triangle', 'octagon'];
 export function Level({ text, index }: { text: string; index: number }) {
   if (index < 0) return <span className="lvl lvx">— {text}</span>;
   return (
     <span className={`lvl lv${index}`}>
-      <span aria-hidden="true">{LEVEL_ICON[index]}</span> {text}
+      <Icon name={LEVEL_ICON[index]!} size={14} /> {text}
     </span>
   );
 }

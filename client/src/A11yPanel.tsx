@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { Preferences } from '@sanithelp/shared';
 import { usePrefs } from './prefs';
+import { Icon } from './icons';
 
 function Segmented<T extends string>({ legend, name, value, options, onChange }: { legend: string; name: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
@@ -52,7 +53,7 @@ export function A11yPanel() {
   return (
     <>
       <button ref={btnRef} className="btn secondary a11y-btn" aria-expanded={open} aria-controls="a11y-panel" onClick={() => setOpen((o) => !o)} aria-keyshortcuts="Alt+A">
-        <span aria-hidden="true">♿</span> Accesibilidad
+        <Icon name="accessibility" /> Accesibilidad
       </button>
       {open && (
         <section id="a11y-panel" className="a11y-panel" aria-labelledby="a11y-title">

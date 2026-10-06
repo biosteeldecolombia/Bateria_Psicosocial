@@ -285,3 +285,118 @@ fieldset.item.missing { background: var(--danger-bg); padding-left: 0.5rem; bord
 .a11y-panel summary { cursor: pointer; font-weight: 700; min-height: 2.75rem; display: flex; align-items: center; }
 .btn.danger { background: var(--danger); color: #fff; border-color: var(--danger); }
 @media (prefers-color-scheme: dark) { .btn.danger { color: #1a0a0a; } }
+
+/* ======================================================================
+   Panel de personal (administrador y psicóloga): ancho completo, pestañas,
+   dashboard, ventanas flotantes. Usa las variables de tema existentes.
+   ====================================================================== */
+.icon { flex: none; vertical-align: -0.2em; }
+main.wide { max-width: none; padding: 1rem 1.25rem 3rem; }
+.topbar { padding: 0.5rem 1.25rem; }
+.topbar .who { display: inline-flex; align-items: center; gap: 0.35rem; }
+.session-note { margin-top: 1.5rem; font-size: 0.85rem; }
+.btn.sm { min-height: 2.25rem; padding: 0.3rem 0.8rem; font-size: 0.9rem; }
+
+.staff { width: 100%; }
+.appnav { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; border-bottom: 2px solid var(--border); margin-bottom: 1.25rem; }
+.appnav [role='tablist'] { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.appnav [role='tab'] {
+  display: inline-flex; align-items: center; gap: 0.5rem; font: inherit; font-weight: 600; min-height: 2.9rem; padding: 0.5rem 1.1rem;
+  background: transparent; color: var(--muted); border: 0; border-bottom: 4px solid transparent; margin-bottom: -2px; cursor: pointer; border-radius: 8px 8px 0 0; position: relative;
+}
+.appnav [role='tab']:hover { color: var(--text); background: var(--surface-2); }
+.appnav [role='tab'].on { color: var(--text); border-bottom-color: var(--accent); background: var(--brand-teal-soft); }
+.appnav > .btn { margin-bottom: 0.4rem; }
+.dot-alert { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--danger); display: inline-block; }
+#staff-panel:focus { outline: none; }
+
+.page-head { margin-bottom: 1rem; }
+.page-head h1 { margin: 0; font-size: 1.5rem; }
+.page-head p { margin: 0.25rem 0 0; }
+.page-head.row-between { align-items: flex-end; }
+.sub { font-size: 1rem; margin: 1.25rem 0 0.4rem; }
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 2px rgba(31, 42, 68, 0.06); }
+.panel.pad { padding: 1.25rem 1.5rem; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+.panel-title { display: flex; align-items: center; gap: 0.5rem; font-size: 1.1rem; margin: 0; color: var(--text); }
+.panel-title .icon { color: var(--primary); }
+
+/* Tarjetas del inicio */
+.kpi-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin-bottom: 1rem; }
+.kpi { position: relative; background: var(--surface); border: 1px solid var(--border); border-top: 5px solid var(--accent); border-radius: 14px; box-shadow: 0 1px 2px rgba(31, 42, 68, 0.06); transition: box-shadow 0.15s, transform 0.15s; }
+.kpi:hover { box-shadow: 0 6px 18px rgba(31, 42, 68, 0.14); transform: translateY(-2px); }
+.kpi-main { display: grid; grid-template-columns: auto 1fr; column-gap: 1rem; align-items: center; width: 100%; text-align: left; font: inherit; color: var(--text); background: transparent; border: 0; padding: 1.25rem 4rem 1.1rem 1.25rem; cursor: pointer; border-radius: 14px; }
+.kpi-icon { grid-row: span 3; display: grid; place-items: center; width: 3.4rem; height: 3.4rem; border-radius: 12px; background: var(--brand-teal-soft); color: var(--primary); }
+.kpi-value { font-size: 2.2rem; font-weight: 800; line-height: 1.1; }
+.kpi-label { font-weight: 700; }
+.kpi-hint { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--muted); font-size: 0.88rem; }
+.kpi-add { position: absolute; top: 0.8rem; right: 0.8rem; display: grid; place-items: center; width: 2.6rem; height: 2.6rem; border-radius: 50%; border: 2px solid var(--primary); background: var(--primary); color: var(--on-primary); cursor: pointer; }
+.kpi-add:hover { filter: brightness(1.1); }
+.home-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); }
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.list-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid transparent; border-radius: 10px; padding: 0.7rem 0.9rem; cursor: pointer; }
+.list-item:hover { border-color: var(--accent); background: var(--brand-teal-soft); }
+
+.card-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr)); }
+.facts { display: grid; gap: 0.35rem; margin: 0 0 1rem; }
+.facts > div { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px dashed var(--border); padding: 0.25rem 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 600; text-align: right; }
+
+/* Filtros y tablas */
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: flex-end; margin-bottom: 1rem; }
+.toolbar .field { min-width: 11rem; }
+.toolbar .field.grow { flex: 1 1 16rem; }
+.toolbar label { margin-top: 0; font-size: 0.85rem; color: var(--muted); }
+.search { position: relative; }
+.search .icon { position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.search input[type='search'] { padding-left: 2.6rem; }
+input[type='search'] { width: 100%; min-height: 2.75rem; padding: 0.55rem 0.75rem; font: inherit; color: var(--text); background: var(--surface); border: 2px solid var(--border); border-radius: 8px; }
+.table-wrap { overflow-x: auto; }
+.table-wrap .table th { background: var(--surface-2); white-space: nowrap; }
+.table-wrap .table tbody tr:hover { background: var(--brand-teal-soft); }
+.table td.actions { white-space: nowrap; text-align: right; }
+.table td.actions .btn { margin-right: 0.35rem; }
+.badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; border: 1.5px solid; margin: 0.1rem 0.3rem 0.1rem 0; white-space: nowrap; }
+.badge.on { color: var(--ok); background: var(--ok-bg); border-color: var(--ok); }
+.badge.off { color: var(--muted); background: var(--surface-2); border-color: var(--border); }
+.badge.warn { color: var(--lv2-fg); background: var(--lv2-bg); border-color: var(--lv2-bd); }
+.chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.65rem; border-radius: 999px; background: var(--brand-teal-soft); color: var(--text); font-size: 0.88rem; font-weight: 600; white-space: nowrap; }
+.empty { display: grid; justify-items: center; gap: 0.5rem; text-align: center; color: var(--muted); padding: 2.5rem 1rem; background: var(--surface); border: 2px dashed var(--border); border-radius: 14px; }
+.empty p { margin: 0; }
+
+.icon-btn { display: inline-grid; place-items: center; width: 2.4rem; height: 2.4rem; border-radius: 8px; border: 2px solid transparent; background: transparent; color: var(--text); cursor: pointer; vertical-align: middle; }
+.icon-btn:hover, .icon-btn[aria-expanded='true'] { background: var(--surface-2); border-color: var(--border); }
+.menu { position: fixed; z-index: 90; min-width: 15rem; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25); padding: 0.35rem; display: grid; }
+.menu-item { display: flex; align-items: center; gap: 0.6rem; width: 100%; text-align: left; font: inherit; color: var(--text); background: transparent; border: 0; border-radius: 8px; padding: 0.6rem 0.75rem; min-height: 2.5rem; cursor: pointer; }
+.menu-item:hover:not([disabled]) { background: var(--surface-2); }
+.menu-item.danger { color: var(--danger); }
+
+/* Ventanas flotantes centradas */
+.dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-top: 5px solid var(--accent); border-radius: 14px; width: 100%; max-height: calc(100vh - 2rem); display: flex; flex-direction: column; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35); }
+.dialog:focus { outline: none; }
+.dialog.sm { max-width: 26rem; }
+.dialog.md { max-width: 38rem; }
+.dialog.lg { max-width: 54rem; }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.25rem 0.5rem; }
+.dialog-head h2 { margin: 0; font-size: 1.15rem; display: flex; align-items: center; gap: 0.5rem; }
+.dialog-head h2 .icon { color: var(--primary); }
+.dialog-body { padding: 0.25rem 1.25rem 1.25rem; overflow: auto; }
+.dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0.6rem; margin-top: 1.25rem; }
+.secret { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 1rem; background: var(--surface-2); border: 2px dashed var(--border); border-radius: 10px; padding: 0.9rem 1rem; margin: 0.5rem 0; }
+.secret dt { color: var(--muted); font-weight: 600; }
+.secret dd { margin: 0; font-family: ui-monospace, Consolas, monospace; font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
+.form-grid { display: grid; gap: 0 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.checks { display: grid; gap: 0 1rem; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
+.perm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.perm-list li { display: flex; align-items: flex-start; gap: 0.5rem; }
+.perm-list .icon { color: var(--ok); margin-top: 0.2rem; }
+
+@media (max-width: 40rem) {
+  main.wide { padding: 0.75rem 0.75rem 3rem; }
+  .appnav [role='tab'] { padding: 0.5rem 0.7rem; }
+  .kpi-main { padding-right: 3.8rem; }
+}

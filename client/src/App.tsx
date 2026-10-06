@@ -7,10 +7,11 @@ import { PrefsProvider, usePrefs } from './prefs';
 import { Management } from './Management';
 import { Participation } from './Participation';
 import { CompanyHome } from './analysis/CompanyHome';
+import { Icon } from './icons';
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Administrador', psychologist: 'Psicóloga', collaborator: 'Colaborador', company: 'Empresa cliente' };
 
-function Shell({ me, onLogout, children }: { me: MeResponse | null; onLogout?: () => void; children: ReactNode }) {
+function Shell({ me, onLogout, wide, children }: { me: MeResponse | null; onLogout?: () => void; wide?: boolean; children: ReactNode }) {
   const mainRef = useRef<HTMLElement>(null);
   return (
     <>
@@ -20,12 +21,12 @@ function Shell({ me, onLogout, children }: { me: MeResponse | null; onLogout?: (
           <img src="/brand/logo_sanithelp_icono.webp" alt="" width="42" height="42" />
           <span>Batería de Riesgo Psicosocial</span>
         </a>
-        {me && <span className="who">{me.fullName} · {ROLE_LABEL[me.role]}</span>}
+        {me && <span className="who"><Icon name="user" size={16} /> {me.fullName} · {ROLE_LABEL[me.role]}</span>}
         {me && <Help role={me.role} />}
         <A11yPanel />
-        {me && onLogout && <button className="btn secondary" onClick={onLogout}>Cerrar sesión</button>}
+        {me && onLogout && <button className="btn secondary" onClick={onLogout}><Icon name="logout" /> Cerrar sesión</button>}
       </header>
-      <main id="contenido" tabIndex={-1} ref={mainRef}>
+      <main id="contenido" tabIndex={-1} ref={mainRef} className={wide ? 'wide' : undefined}>
         {children}
         <p className="footer">
           Instrumento oficial Mintrabajo (Res. 2404/2019) · Datos sensibles — Ley 1581/2012 · Sanithelp S.A.S.
@@ -138,9 +139,9 @@ function MfaVerify({ onMe }: { onMe: (m: MeResponse) => void }) {
 
 function Footer({ me, onLogoutAll }: { me: MeResponse; onLogoutAll: () => void }) {
   return (
-    <p className="muted" style={{ marginTop: '1.5rem' }}>
+    <p className="muted session-note">
       Tu sesión se cierra tras {me.idleMinutes} minutos sin actividad.{' '}
-      {me.role !== 'collaborator' && <button className="btn secondary" onClick={onLogoutAll}>Cerrar sesión en todos los dispositivos</button>}
+      {me.role !== 'collaborator' && <button className="btn secondary sm" onClick={onLogoutAll}><Icon name="logout" size={16} /> Cerrar sesión en todos los dispositivos</button>}
     </p>
   );
 }
@@ -218,7 +219,7 @@ function Inner() {
   else body = <><CompanyHome me={me} /><Footer me={me} onLogoutAll={logoutAll} /></>;
 
   return (
-    <Shell me={me} onLogout={me ? logout : undefined}>
+    <Shell me={me} onLogout={me ? logout : undefined} wide={!!me && me.status === 'ready' && (me.role === 'admin' || me.role === 'psychologist')}>
       {body}
       {me && <SessionWarning me={me} onExtend={extend} onExpired={expired} />}
     </Shell>

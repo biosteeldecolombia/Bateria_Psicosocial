@@ -1,46 +1,18 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { MeResponse } from '@sanithelp/shared';
-import { api, ApiError } from './api';
+import { api } from './api';
 import { Analysis } from './analysis/Analysis';
-import { Users } from './Users';
+import { Icon, type IconName } from './icons';
+import { EmptyState, Modal, RowMenu, SecretModal, StatusBadge, useAction, type Secret } from './ui';
+import { Users, type UserRow } from './Users';
 
-interface Company { id: string; name: string; code: string }
-interface Campaign { id: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null }
-interface Secret { title: string; username: string; password: string }
+interface Company { id: string; name: string; code: string; nit: string | null; minGroupSize: number; active: boolean }
+interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; createdAt: string }
 
-function SecretBox({ s, onClose }: { s: Secret; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const text = `Usuario: ${s.username}\nContraseña: ${s.password}`;
-  return (
-    <div className="alert ok" role="status">
-      <strong>{s.title}</strong>
-      <p>Anótala o cópiala ahora: <strong>no se volverá a mostrar</strong>.</p>
-      <p className="big-code" style={{ fontSize: '1.2rem' }}>Usuario: {s.username}<br />Contraseña: {s.password}</p>
-      <button className="btn secondary" onClick={() => navigator.clipboard?.writeText(text).then(() => setCopied(true)).catch(() => undefined)}>{copied ? 'Copiado' : 'Copiar'}</button>{' '}
-      <button className="btn secondary" onClick={onClose}>Ya la guardé</button>
-    </div>
-  );
-}
-
-function useAction() {
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const run = async (fn: () => Promise<void>) => {
-    setError('');
-    setBusy(true);
-    try {
-      await fn();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'No se pudo conectar.');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { error, busy, run };
-}
+type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'perfil';
 
 /** Datos profesionales de la psicóloga: salen en el consentimiento de cada expediente en PDF. */
-function ProfileCard() {
+function ProfileCard({ onSaved }: { onSaved: () => void }) {
   const [doc, setDoc] = useState('');
   const [reg, setReg] = useState('');
   const [saved, setSaved] = useState(false);
@@ -51,232 +23,430 @@ function ProfileCard() {
       .then((r) => { setDoc(r.professionalDocument); setReg(r.professionalRegistry); setSaved(!!r.professionalDocument && !!r.professionalRegistry); setLoaded(true); })
       .catch(() => setLoaded(true));
   }, []);
-  if (!loaded) return null;
+  if (!loaded) return <p className="muted" role="status">Cargando…</p>;
   return (
-    <section className="card" aria-labelledby="pf" style={{ marginTop: '1rem' }}>
-      <h2 id="pf">Mi perfil profesional</h2>
-      {!saved && <div className="alert error" role="status">Completa estos datos para poder descargar expedientes en PDF: aparecen en el consentimiento informado.</div>}
+    <section className="panel pad" aria-labelledby="pf" style={{ maxWidth: '40rem' }}>
+      <h2 id="pf" className="panel-title"><Icon name="user" size={20} /> Mi perfil profesional</h2>
+      <p className="muted">Estos datos aparecen en el consentimiento informado de cada expediente en PDF.</p>
+      {!saved && <div className="alert error" role="status">Completa estos datos para poder descargar expedientes en PDF.</div>}
       {act.error && <div className="alert error" role="alert">{act.error}</div>}
       <form
         noValidate
         onSubmit={(e) => {
           e.preventDefault();
-          void act.run(async () => { await api('PUT', '/api/profile', { professionalDocument: doc, professionalRegistry: reg }); setSaved(true); });
+          void act.run(async () => { await api('PUT', '/api/profile', { professionalDocument: doc, professionalRegistry: reg }); setSaved(true); onSaved(); });
         }}
       >
         <label htmlFor="pd">Documento de identidad</label>
         <input id="pd" type="text" autoComplete="off" value={doc} onChange={(e) => { setDoc(e.target.value); setSaved(false); }} />
-        <label htmlFor="pr">Registro o licencia profesional (SST / psicología)</label>
+        <label htmlFor="pr">Registro o licencia profesional (SST o psicología)</label>
         <input id="pr" type="text" autoComplete="off" value={reg} onChange={(e) => { setReg(e.target.value); setSaved(false); }} />
-        <button className="btn" disabled={act.busy || !doc || !reg}>{saved ? 'Guardado' : 'Guardar'}</button>
+        <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="btn" disabled={act.busy || !doc || !reg}><Icon name="check" /> {saved ? 'Guardado' : 'Guardar'}</button>
+        </div>
       </form>
     </section>
   );
 }
 
+function CompanyForm({ onDone, onClose }: { onDone: () => Promise<void>; onClose: () => void }) {
+  const act = useAction();
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [nit, setNit] = useState('');
+  const [min, setMin] = useState(5);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void act.run(async () => {
+      await api('POST', '/api/admin/companies', { name, code, ...(nit.trim() ? { nit: nit.trim() } : {}), minGroupSize: min });
+      await onDone();
+      onClose();
+    });
+  };
+  return (
+    <Modal title="Nueva empresa" icon="building" onClose={onClose}>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      <form onSubmit={submit} noValidate>
+        <div className="form-grid">
+          <div>
+            <label htmlFor="co-n">Nombre</label>
+            <input id="co-n" type="text" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="co-c">Código corto (letras, números o guion)</label>
+            <input id="co-c" type="text" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="ACME" />
+          </div>
+          <div>
+            <label htmlFor="co-t">NIT (opcional)</label>
+            <input id="co-t" type="text" value={nit} onChange={(e) => setNit(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="co-m">Tamaño mínimo de grupo en reportes</label>
+            <select id="co-m" value={min} onChange={(e) => setMin(Number(e.target.value))}>
+              {[3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n} personas</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="dialog-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn" disabled={act.busy || name.trim().length < 2 || code.length < 2}><Icon name="check" /> Crear empresa</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function CampaignForm({ companies, initialCompany, onDone, onSecret, onClose }: { companies: Company[]; initialCompany: string; onDone: () => Promise<void>; onSecret: (s: Secret) => void; onClose: () => void }) {
+  const act = useAction();
+  const [companyId, setCompanyId] = useState(initialCompany || companies[0]?.id || '');
+  const [name, setName] = useState('');
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void act.run(async () => {
+      const r = await api<{ username: string; password: string }>('POST', '/api/campaigns', { companyId, name });
+      await onDone();
+      onClose();
+      onSecret({ title: 'Credencial de la campaña creada', ...r });
+    });
+  };
+  return (
+    <Modal title="Nueva campaña" icon="clipboard" size="sm" onClose={onClose}>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      {companies.length === 0 ? <p className="muted">Aún no tienes empresas asignadas. Pídele al administrador que te asigne una.</p> : (
+        <form onSubmit={submit} noValidate>
+          <label htmlFor="cm-c">Empresa</label>
+          <select id="cm-c" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+            {companies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+          </select>
+          <label htmlFor="cm-n">Nombre de la campaña</label>
+          <input id="cm-n" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Ronda 2026" />
+          <p className="muted">Se genera la credencial que entregas a los colaboradores; todos la comparten y se identifican con su documento.</p>
+          <div className="dialog-actions">
+            <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+            <button className="btn" disabled={act.busy || name.trim().length < 2 || !companyId}><Icon name="check" /> Crear y generar credencial</button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
 export function Management({ me }: { me: MeResponse }) {
   const isAdmin = me.role === 'admin';
+  const tabs: { key: TabKey; label: string; icon: IconName }[] = [
+    { key: 'inicio', label: 'Inicio', icon: 'home' },
+    { key: 'empresas', label: 'Empresas', icon: 'building' },
+    { key: 'campanas', label: 'Campañas', icon: 'clipboard' },
+    ...(isAdmin ? [{ key: 'usuarios' as const, label: 'Usuarios', icon: 'users' as const }] : [{ key: 'perfil' as const, label: 'Mi perfil', icon: 'user' as const }]),
+  ];
+  const fromHash = (): TabKey => {
+    const h = window.location.hash.replace('#/', '') as TabKey;
+    return tabs.some((t) => t.key === h) ? h : 'inicio';
+  };
+
+  const [tab, setTabState] = useState<TabKey>(fromHash);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [usersLoaded, setUsersLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [secret, setSecret] = useState<Secret | null>(null);
   const [analysis, setAnalysis] = useState<Campaign | null>(null);
-  const [view, setView] = useState<'gestion' | 'usuarios'>('gestion');
+  const [profileDone, setProfileDone] = useState(true);
+  const [newCompany, setNewCompany] = useState(false);
+  const [newCampaign, setNewCampaign] = useState(false);
+  const [newUser, setNewUser] = useState(false);
+  const [coFilter, setCoFilter] = useState('');
+  const [stFilter, setStFilter] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
   const act = useAction();
 
-  const [companyId, setCompanyId] = useState('');
-  const [campaignName, setCampaignName] = useState('');
-  const [coName, setCoName] = useState('');
-  const [coCode, setCoCode] = useState('');
-  const [uRole, setURole] = useState<'psychologist' | 'admin' | 'company'>('psychologist');
-  const [uEmail, setUEmail] = useState('');
-  const [uName, setUName] = useState('');
-  const [uCompanies, setUCompanies] = useState<string[]>([]);
-  const [uRegistry, setURegistry] = useState('');
-  const [uDocument, setUDocument] = useState('');
+  const setTab = useCallback((k: TabKey) => {
+    setTabState(k);
+    setAnalysis(null);
+    window.history.replaceState(null, '', `#/${k}`);
+  }, []);
+  useEffect(() => {
+    const h = () => setTabState(fromHash());
+    window.addEventListener('hashchange', h);
+    return () => window.removeEventListener('hashchange', h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = useCallback(async () => {
     const [co, ca] = await Promise.all([api<Company[]>('GET', '/api/companies'), api<Campaign[]>('GET', '/api/campaigns')]);
     setCompanies(co);
     setCampaigns(ca);
-    setCompanyId((cur) => cur || co[0]?.id || '');
+    setLoaded(true);
   }, []);
+  const loadUsers = useCallback(async () => {
+    if (!isAdmin) return;
+    setUsers(await api<UserRow[]>('GET', '/api/admin/users'));
+    setUsersLoaded(true);
+  }, [isAdmin]);
+  const checkProfile = useCallback(() => {
+    if (me.role !== 'psychologist') return;
+    api<{ professionalDocument: string; professionalRegistry: string }>('GET', '/api/profile')
+      .then((r) => setProfileDone(!!r.professionalDocument && !!r.professionalRegistry))
+      .catch(() => undefined);
+  }, [me.role]);
   useEffect(() => {
-    void load().catch(() => undefined);
-  }, [load]);
+    void load().catch(() => setLoaded(true));
+    void loadUsers().catch(() => setUsersLoaded(true));
+    checkProfile();
+  }, [load, loadUsers, checkProfile]);
 
-  const createCampaign = (e: FormEvent) => {
-    e.preventDefault();
-    void act.run(async () => {
-      const r = await api<{ username: string; password: string }>('POST', '/api/campaigns', { companyId, name: campaignName });
-      setSecret({ title: 'Credencial de la campaña creada', ...r });
-      setCampaignName('');
-      await load();
-    });
+  const goCampaigns = (companyId = '') => { setCoFilter(companyId); setStFilter(''); setTab('campanas'); };
+  const activeCompanies = companies.filter((c) => c.active);
+  const openCampaigns = campaigns.filter((c) => c.status === 'open');
+  const activeUsers = users.filter((u) => u.active);
+  const campaignsOf = (id: string) => campaigns.filter((c) => c.companyId === id);
+
+  const onKey = (e: KeyboardEvent) => {
+    const i = tabs.findIndex((t) => t.key === tab);
+    if (e.key === 'ArrowRight') setTab(tabs[(i + 1) % tabs.length]!.key);
+    if (e.key === 'ArrowLeft') setTab(tabs[(i + tabs.length - 1) % tabs.length]!.key);
   };
-  const createCompany = (e: FormEvent) => {
-    e.preventDefault();
-    void act.run(async () => {
-      await api('POST', '/api/admin/companies', { name: coName, code: coCode, minGroupSize: 5 });
-      setCoName('');
-      setCoCode('');
-      await load();
-    });
-  };
-  const createUser = (e: FormEvent) => {
-    e.preventDefault();
-    void act.run(async () => {
-      const r = await api<{ username: string; password: string }>('POST', '/api/admin/users', {
-        role: uRole,
-        username: uEmail,
-        fullName: uName,
-        ...(uRole === 'company' ? { companyId: uCompanies[0] } : {}),
-        ...(uRole === 'psychologist' ? { assignedCompanyIds: uCompanies, ...(uRegistry ? { professionalRegistry: uRegistry } : {}), ...(uDocument ? { professionalDocument: uDocument } : {}) } : {}),
-      });
-      setSecret({ title: `Cuenta creada (${uRole === 'psychologist' ? 'psicóloga' : uRole === 'admin' ? 'administrador' : 'empresa cliente'})`, username: r.username, password: r.password });
-      setUEmail('');
-      setUName('');
-      setUCompanies([]);
-      setURegistry('');
-      setUDocument('');
-    });
-  };
+
+  const kpis: { key: TabKey; icon: IconName; value: number; label: string; hint: string; add?: { label: string; onClick: () => void } }[] = [
+    { key: 'empresas', icon: 'building', value: activeCompanies.length, label: isAdmin ? 'Empresas activas' : 'Empresas asignadas', hint: 'Ver empresas', add: isAdmin ? { label: 'Nueva empresa', onClick: () => setNewCompany(true) } : undefined },
+    { key: 'campanas', icon: 'clipboard', value: openCampaigns.length, label: 'Campañas abiertas', hint: `${campaigns.length} en total`, add: { label: 'Nueva campaña', onClick: () => setNewCampaign(true) } },
+    ...(isAdmin ? [{ key: 'usuarios' as const, icon: 'users' as const, value: activeUsers.length, label: 'Usuarios activos', hint: `${users.length} cuentas`, add: { label: 'Nueva cuenta', onClick: () => { setTab('usuarios'); setNewUser(true); } } }] : []),
+  ];
+
+  const shownCampaigns = campaigns.filter((c) => (!coFilter || c.companyId === coFilter) && (!stFilter || c.status === stFilter));
+  const shownCompanies = companies.filter((c) => showInactive || c.active);
 
   return (
-    <>
-      <section className="card" aria-labelledby="t">
-        <h1 id="t">Hola, {me.fullName}</h1>
-        <p className="muted">Aquí creas la credencial que entregas a los colaboradores de cada empresa. Todos los colaboradores de una campaña usan la misma credencial y se identifican con su documento.</p>
-        {act.error && <div className="alert error" role="alert">{act.error}</div>}
-        {secret && <SecretBox s={secret} onClose={() => setSecret(null)} />}
-      </section>
-
-      {isAdmin && (
-        <div role="tablist" aria-label="Secciones de administración" className="tabs">
-          {([['gestion', 'Gestión'], ['usuarios', 'Usuarios']] as const).map(([k, label]) => (
-            <button key={k} role="tab" id={`mtab-${k}`} aria-selected={view === k} aria-controls={`mpanel-${k}`} tabIndex={view === k ? 0 : -1} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{label}</button>
+    <div className="staff">
+      <nav className="appnav" aria-label="Secciones">
+        <div role="tablist" aria-label="Secciones de gestión" onKeyDown={onKey}>
+          {tabs.map((t) => (
+            <button key={t.key} role="tab" id={`tab-${t.key}`} aria-selected={tab === t.key} aria-controls="staff-panel" tabIndex={tab === t.key ? 0 : -1} className={tab === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>
+              <Icon name={t.icon} /> {t.label}
+              {t.key === 'perfil' && !profileDone && <span className="dot-alert" role="img" aria-label="Pendiente" />}
+            </button>
           ))}
         </div>
-      )}
+        {tab === 'empresas' && isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Nueva empresa</button>}
+        {tab === 'campanas' && !analysis && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}
+        {tab === 'usuarios' && <button className="btn" onClick={() => setNewUser(true)}><Icon name="plus" /> Nueva cuenta</button>}
+      </nav>
 
-      {isAdmin && view === 'usuarios' && (
-        <div role="tabpanel" id="mpanel-usuarios" aria-labelledby="mtab-usuarios">
-          <Users companies={companies} onSecret={(title, username, password) => setSecret({ title, username, password })} />
-        </div>
-      )}
+      <div role="tabpanel" id="staff-panel" aria-labelledby={`tab-${tab}`} tabIndex={0}>
+        {act.error && <div className="alert error" role="alert">{act.error}</div>}
 
-      {me.role === 'psychologist' && <ProfileCard />}
+        {tab === 'inicio' && (
+          <>
+            <div className="page-head">
+              <h1>Hola, {me.fullName}</h1>
+              <p className="muted">Resumen de tu operación. Haz clic en una tarjeta para ver el detalle.</p>
+            </div>
+            {me.role === 'psychologist' && !profileDone && (
+              <div className="alert error banner" role="status">
+                <span>Completa tu perfil profesional para poder descargar expedientes en PDF.</span>
+                <button className="btn secondary sm" onClick={() => setTab('perfil')}>Completar perfil <Icon name="arrow" /></button>
+              </div>
+            )}
+            <div className="kpi-grid">
+              {kpis.map((k) => (
+                <article className="kpi" key={k.key}>
+                  <button className="kpi-main" onClick={() => (k.key === 'campanas' ? goCampaigns() : setTab(k.key))}>
+                    <span className="kpi-icon"><Icon name={k.icon} size={24} /></span>
+                    <span className="kpi-value">{loaded ? k.value : '–'}</span>
+                    <span className="kpi-label">{k.label}</span>
+                    <span className="kpi-hint">{k.hint} <Icon name="arrow" size={14} /></span>
+                  </button>
+                  {k.add && <button className="kpi-add" aria-label={k.add.label} title={k.add.label} onClick={k.add.onClick}><Icon name="plus" size={20} /></button>}
+                </article>
+              ))}
+            </div>
 
-      {!(isAdmin && view === 'usuarios') && <>
-      <section className="card" aria-labelledby="c1" style={{ marginTop: '1rem' }}>
-        <h2 id="c1">Nueva campaña (ronda de aplicación)</h2>
-        {companies.length === 0 ? (
-          <p className="muted">{isAdmin ? 'Primero crea una empresa (abajo).' : 'Aún no tienes empresas asignadas. Pídele al administrador que te asigne una.'}</p>
+            <div className="home-grid">
+              <section className="panel pad" aria-labelledby="h-camp">
+                <div className="panel-head">
+                  <h2 id="h-camp" className="panel-title"><Icon name="clipboard" size={20} /> Campañas recientes</h2>
+                  <button className="btn secondary sm" onClick={() => goCampaigns()}>Ver todas</button>
+                </div>
+                {campaigns.length === 0 ? <EmptyState icon="clipboard" text="Todavía no hay campañas.">{companies.length > 0 && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Crear campaña</button>}</EmptyState> : (
+                  <ul className="list">
+                    {campaigns.slice(0, 6).map((c) => (
+                      <li key={c.id}>
+                        <button className="list-item" onClick={() => { setTab('campanas'); setAnalysis(c); }}>
+                          <span><strong>{c.name}</strong><br /><span className="muted">{c.companyName}</span></span>
+                          <StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <section className="panel pad" aria-labelledby="h-co">
+                <div className="panel-head">
+                  <h2 id="h-co" className="panel-title"><Icon name="building" size={20} /> Empresas</h2>
+                  <button className="btn secondary sm" onClick={() => setTab('empresas')}>Ver todas</button>
+                </div>
+                {activeCompanies.length === 0 ? <EmptyState icon="building" text={isAdmin ? 'Aún no hay empresas.' : 'Aún no tienes empresas asignadas.'}>{isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Crear empresa</button>}</EmptyState> : (
+                  <ul className="list">
+                    {activeCompanies.slice(0, 6).map((c) => (
+                      <li key={c.id}>
+                        <button className="list-item" onClick={() => goCampaigns(c.id)}>
+                          <span><strong>{c.name}</strong><br /><span className="muted">{c.code}</span></span>
+                          <span className="chip">{campaignsOf(c.id).length} {campaignsOf(c.id).length === 1 ? "campaña" : "campañas"}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+
+        {tab === 'empresas' && (
+          <>
+            <div className="page-head row-between">
+              <div>
+                <h1>Empresas</h1>
+                <p className="muted">{isAdmin ? 'Todas las empresas registradas.' : 'Las empresas que tienes asignadas.'}</p>
+              </div>
+              <label className="check"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Mostrar inactivas</label>
+            </div>
+            {!loaded ? <p className="muted" role="status">Cargando…</p> : shownCompanies.length === 0 ? (
+              <EmptyState icon="building" text={isAdmin ? 'Aún no hay empresas.' : 'Aún no tienes empresas asignadas. Pídele al administrador que te asigne una.'}>
+                {isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Crear empresa</button>}
+              </EmptyState>
+            ) : (
+              <div className="card-grid">
+                {shownCompanies.map((c) => {
+                  const cps = campaignsOf(c.id);
+                  const team = users.filter((u) => u.role === 'psychologist' && u.companies.some((x) => x.id === c.id));
+                  return (
+                    <article className="panel pad co-card" key={c.id}>
+                      <div className="panel-head">
+                        <h2 className="panel-title"><Icon name="building" size={20} /> {c.name}</h2>
+                        <StatusBadge on={c.active} onText="Activa" offText="Inactiva" />
+                      </div>
+                      <dl className="facts">
+                        <div><dt>Código</dt><dd><code>{c.code}</code></dd></div>
+                        <div><dt>NIT</dt><dd>{c.nit || '—'}</dd></div>
+                        <div><dt>Grupo mínimo</dt><dd>{c.minGroupSize} personas</dd></div>
+                        <div><dt>Campañas</dt><dd>{cps.length} ({cps.filter((x) => x.status === 'open').length} abiertas)</dd></div>
+                        {isAdmin && <div><dt>Psicólogas</dt><dd>{team.length ? team.map((u) => u.fullName).join(', ') : 'Sin asignar'}</dd></div>}
+                      </dl>
+                      <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
+                        <button className="btn secondary sm" onClick={() => goCampaigns(c.id)}>Ver campañas <Icon name="arrow" /></button>
+                        <button className="btn sm" onClick={() => { setCoFilter(c.id); setNewCampaign(true); }}><Icon name="plus" /> Campaña</button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === 'campanas' && (analysis ? (
+          <>
+            <button className="btn secondary sm" style={{ marginBottom: '0.75rem' }} onClick={() => setAnalysis(null)}><Icon name="back" /> Volver a campañas</button>
+            <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} isAdmin={isAdmin} onClose={() => setAnalysis(null)} />
+          </>
         ) : (
-          <form onSubmit={createCampaign} noValidate>
-            <label htmlFor="cc">Empresa</label>
-            <select id="cc" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
-            </select>
-            <label htmlFor="cn">Nombre de la campaña</label>
-            <input id="cn" type="text" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="Ej. Ronda 2026" />
-            <button className="btn block" disabled={act.busy || campaignName.trim().length < 2}>Crear campaña y generar credencial</button>
-          </form>
+          <>
+            <div className="page-head">
+              <h1>Campañas</h1>
+              <p className="muted">Cada campaña es una ronda de aplicación con su credencial de acceso para los colaboradores.</p>
+            </div>
+            <div className="toolbar">
+              <div className="field">
+                <label htmlFor="f-co">Empresa</label>
+                <select id="f-co" value={coFilter} onChange={(e) => setCoFilter(e.target.value)}>
+                  <option value="">Todas las empresas</option>
+                  {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="f-st">Estado</label>
+                <select id="f-st" value={stFilter} onChange={(e) => setStFilter(e.target.value)}>
+                  <option value="">Todas</option>
+                  <option value="open">Abiertas</option>
+                  <option value="closed">Cerradas</option>
+                </select>
+              </div>
+            </div>
+            {!loaded ? <p className="muted" role="status">Cargando…</p> : shownCampaigns.length === 0 ? (
+              <EmptyState icon="clipboard" text="No hay campañas que coincidan.">{companies.length > 0 && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}</EmptyState>
+            ) : (
+              <div className="panel table-wrap">
+                <table className="table">
+                  <caption className="sr-only">Campañas y su credencial de acceso</caption>
+                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Usuario de acceso</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+                  <tbody>
+                    {shownCampaigns.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.companyName}</td>
+                        <td><strong>{c.name}</strong></td>
+                        <td><code>{c.accessUsername}</code></td>
+                        <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
+                        <td className="actions">
+                          <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> Resultados</button>
+                          <RowMenu
+                            label={`Más acciones para ${c.name}`}
+                            items={[
+                              {
+                                label: 'Nueva contraseña de acceso', icon: 'key', onSelect: () => void act.run(async () => {
+                                  if (!window.confirm('Se generará una contraseña nueva y la anterior dejará de funcionar. ¿Continuar?')) return;
+                                  const r = await api<{ username: string; password: string }>('POST', `/api/campaigns/${c.id}/regenerate-access`);
+                                  setSecret({ title: `Nueva contraseña para ${c.name}`, ...r });
+                                }),
+                              },
+                              {
+                                label: c.status === 'open' ? 'Cerrar campaña' : 'Reabrir campaña', icon: c.status === 'open' ? 'lock' : 'refresh', onSelect: () => void act.run(async () => {
+                                  await api('POST', `/api/campaigns/${c.id}/status`, { status: c.status === 'open' ? 'closed' : 'open' });
+                                  await load();
+                                }),
+                              },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ))}
+
+        {tab === 'usuarios' && isAdmin && (
+          <>
+            <div className="page-head">
+              <h1>Usuarios</h1>
+              <p className="muted">Cuentas de personas con su rol, empresas asignadas y permisos. Las credenciales de colaboradores se gestionan en cada campaña.</p>
+            </div>
+            <Users
+              rows={users}
+              loaded={usersLoaded}
+              companies={companies}
+              reload={async () => { await Promise.all([loadUsers(), load()]); }}
+              onSecret={(title, username, password) => setSecret({ title, username, password })}
+              openNew={newUser}
+              onCloseNew={() => setNewUser(false)}
+            />
+          </>
         )}
-      </section>
 
-      <section className="card" aria-labelledby="c2" style={{ marginTop: '1rem' }}>
-        <h2 id="c2">Campañas</h2>
-        {campaigns.length === 0 ? <p className="muted">Todavía no hay campañas.</p> : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table">
-              <caption className="sr-only">Campañas y su credencial de acceso</caption>
-              <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Usuario de acceso</th><th scope="col">Estado</th><th scope="col">Acciones</th></tr></thead>
-              <tbody>
-                {campaigns.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.companyName}</td>
-                    <td>{c.name}</td>
-                    <td><code>{c.accessUsername}</code></td>
-                    <td>{c.status === 'open' ? '● Abierta' : '■ Cerrada'}</td>
-                    <td>
-                      <button className="btn" onClick={() => setAnalysis(c)}>Ver resultados</button>{' '}
-                      <button className="btn secondary" disabled={act.busy} onClick={() => act.run(async () => {
-                        if (!window.confirm('Se generará una contraseña nueva y la anterior dejará de funcionar. ¿Continuar?')) return;
-                        const r = await api<{ username: string; password: string }>('POST', `/api/campaigns/${c.id}/regenerate-access`);
-                        setSecret({ title: `Nueva contraseña para ${c.name}`, ...r });
-                      })}>Nueva contraseña</button>{' '}
-                      <button className="btn secondary" disabled={act.busy} onClick={() => act.run(async () => {
-                        await api('POST', `/api/campaigns/${c.id}/status`, { status: c.status === 'open' ? 'closed' : 'open' });
-                        await load();
-                      })}>{c.status === 'open' ? 'Cerrar' : 'Reabrir'}</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        {tab === 'perfil' && me.role === 'psychologist' && (
+          <>
+            <div className="page-head"><h1>Mi perfil</h1></div>
+            <ProfileCard onSaved={checkProfile} />
+          </>
         )}
-      </section>
+      </div>
 
-      {analysis && <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} isAdmin={isAdmin} onClose={() => setAnalysis(null)} />}
-
-      {isAdmin && (
-        <>
-          <section className="card" aria-labelledby="a1" style={{ marginTop: '1rem' }}>
-            <h2 id="a1">Nueva empresa</h2>
-            <form onSubmit={createCompany} noValidate>
-              <label htmlFor="en">Nombre</label>
-              <input id="en" type="text" value={coName} onChange={(e) => setCoName(e.target.value)} />
-              <label htmlFor="ec">Código corto (letras, números o guion)</label>
-              <input id="ec" type="text" value={coCode} onChange={(e) => setCoCode(e.target.value.toUpperCase())} placeholder="ACME" />
-              <button className="btn block" disabled={act.busy || coName.trim().length < 2 || coCode.length < 2}>Crear empresa</button>
-            </form>
-          </section>
-
-          <section className="card" aria-labelledby="a2" style={{ marginTop: '1rem' }}>
-            <h2 id="a2">Nueva cuenta de persona</h2>
-            <p className="muted">Para psicólogas, administradores o empresas cliente. La contraseña la genera el sistema; si se pierde, se restablece desde aquí.</p>
-            <form onSubmit={createUser} noValidate>
-              <label htmlFor="ur">Rol</label>
-              <select id="ur" value={uRole} onChange={(e) => { setURole(e.target.value as typeof uRole); setUCompanies([]); }}>
-                <option value="psychologist">Psicóloga</option>
-                <option value="admin">Administrador</option>
-                <option value="company">Empresa cliente (solo reportes)</option>
-              </select>
-              <label htmlFor="ue">Correo (será su usuario)</label>
-              <input id="ue" type="email" value={uEmail} onChange={(e) => setUEmail(e.target.value)} />
-              <label htmlFor="un">Nombre completo</label>
-              <input id="un" type="text" value={uName} onChange={(e) => setUName(e.target.value)} />
-              {uRole === 'psychologist' && (
-                <>
-                  <label htmlFor="ud">N.° de identificación de la profesional (aparece en el consentimiento)</label>
-                  <input id="ud" type="text" value={uDocument} onChange={(e) => setUDocument(e.target.value)} />
-                  <label htmlFor="ur">Registro / licencia profesional</label>
-                  <input id="ur" type="text" value={uRegistry} onChange={(e) => setURegistry(e.target.value)} />
-                </>
-              )}
-              {uRole !== 'admin' && (
-                <fieldset style={{ border: 0, padding: 0, margin: '1rem 0 0' }}>
-                  <legend style={{ fontWeight: 700 }}>{uRole === 'psychologist' ? 'Empresas que atiende' : 'Empresa'}</legend>
-                  {companies.map((c) => (
-                    <label className="check" key={c.id}>
-                      <input
-                        type={uRole === 'company' ? 'radio' : 'checkbox'}
-                        name="uco"
-                        checked={uCompanies.includes(c.id)}
-                        onChange={(e) => setUCompanies(uRole === 'company' ? [c.id] : e.target.checked ? [...uCompanies, c.id] : uCompanies.filter((x) => x !== c.id))}
-                      />{' '}
-                      {c.name}
-                    </label>
-                  ))}
-                </fieldset>
-              )}
-              <button className="btn block" disabled={act.busy || !uEmail || uName.trim().length < 2 || (uRole === 'company' && !uCompanies.length)}>Crear cuenta</button>
-            </form>
-          </section>
-        </>
-      )}
-      </>}
-    </>
+      {newCompany && <CompanyForm onDone={load} onClose={() => setNewCompany(false)} />}
+      {newCampaign && <CampaignForm companies={activeCompanies} initialCompany={coFilter} onDone={load} onSecret={setSecret} onClose={() => setNewCampaign(false)} />}
+      {secret && <SecretModal s={secret} onClose={() => setSecret(null)} />}
+    </div>
   );
 }
