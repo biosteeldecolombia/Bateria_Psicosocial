@@ -1,0 +1,1 @@
+ALTER TABLE "participants" ADD COLUMN "surnames_enc" text;

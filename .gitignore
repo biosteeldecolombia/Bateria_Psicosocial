@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.pgdata/
+generated/
+coverage/
+tmp_xl/
+tmp_txt/
+*.xlsm
+*.xlsx
+server/dist/
+client/dist/

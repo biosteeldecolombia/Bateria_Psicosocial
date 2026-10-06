@@ -1,0 +1,48 @@
+{
+  "name": "@sanithelp/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "db:generate": "drizzle-kit generate",
+    "create-admin": "tsx src/scripts/create-admin.ts",
+    "rotate-keys": "tsx src/scripts/rotate-keys.ts",
+    "purge-expired": "tsx src/scripts/purge-expired.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev:local": "tsx src/scripts/dev-local.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/helmet": "^13.1.1",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.5",
+    "@node-rs/argon2": "^2.2.1",
+    "@sanithelp/scoring": "^0.1.0",
+    "@sanithelp/shared": "^0.1.0",
+    "archiver": "^8.0.0",
+    "drizzle-orm": "^0.45.3",
+    "fastify": "^5.12.5",
+    "otpauth": "^9.5.2",
+    "pdf-lib": "^1.17.1",
+    "pg": "^8.23.1",
+    "qrcode": "^1.5.4",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/archiver": "^8.0.0",
+    "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
+    "drizzle-kit": "^0.31.11",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

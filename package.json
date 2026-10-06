@@ -1,0 +1,28 @@
+{
+  "name": "bateria-psicosocial",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BaterÃ­a de Riesgo Psicosocial Â· Sanithelp S.A.S.",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build -w client && npm run build -w server",
+    "start": "npm run start -w server",
+    "migrate": "npm run migrate -w server",
+    "db:generate": "npm run db:generate -w server",
+    "create-admin": "npm run create-admin -w server",
+    "rotate-keys": "npm run rotate-keys -w server",
+    "purge-expired": "npm run purge-expired -w server --",
+    "test": "npm run test -w packages/scoring && npm run test -w server",
+    "typecheck": "npm run typecheck -w packages/scoring && npm run typecheck -w server && npm run typecheck -w client",
+    "local": "npm run build -w client && npm run dev:local -w server"
+  }
+}
