@@ -62,7 +62,13 @@ describe('PDF de respuestas', () => {
     const consent = await cl.call('GET', '/api/participation/consent');
     await cl.call('POST', '/api/participation/consent', { decision: 'declined', hash: consent.json.hash });
     const list = await admin.call('GET', `/api/campaigns/${camp.json.id}/participants`);
-    const res = await rawGet(admin, `/api/participants/${list.json[0].id}/expediente.pdf?justification=Soporte%20caso%20de%20prueba`);
+    const url = `/api/participants/${list.json[0].id}/expediente.pdf?justification=Soporte%20caso%20de%20prueba`;
+    // Sin psicóloga asignada no se genera: sus datos son obligatorios en el consentimiento.
+    expect((await rawGet(admin, url)).statusCode).toBe(409);
+    const users = await admin.call('GET', '/api/admin/users');
+    const psyId = users.json.find((u: { username: string }) => u.username === 'pdf@sanithelp.test').id;
+    await admin.call('PUT', `/api/admin/users/${psyId}/companies`, { companyIds: [companyId, co.json.id] });
+    const res = await rawGet(admin, url);
     expect(res.statusCode).toBe(200);
     expect((await PDFDocument.load(res.rawPayload)).getPageCount()).toBe(2);
   });
