@@ -1,9 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { desc, eq, inArray } from 'drizzle-orm';
-import { createCompanySchema, createUserSchema, updateUserSchema, MFA_ROLES } from '@sanithelp/shared';
-import { auditLog, companies, psychologistCompanies, users } from '../db/schema.js';
+import { and, desc, eq, inArray } from 'drizzle-orm';
+import { createCompanySchema, createUserSchema, updateCompanySchema, updateUserSchema, MFA_ROLES } from '@sanithelp/shared';
+import { auditLog, campaigns, companies, psychologistCompanies, users } from '../db/schema.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
-import { generateTempPassword, hashPassword, validatePasswordPolicy } from '../security/passwords.js';
+import { generateTempPassword, hashPassword, validatePasswordPolicy, verifyPassword } from '../security/passwords.js';
 
 const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
 
@@ -22,6 +22,61 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     const [row] = await db.insert(companies).values(body.data).returning();
     await audit(db, req.auth!.user.id, 'company.created', { type: 'company', id: row!.id });
     return reply.code(201).send(row);
+  });
+
+  /** Edita una empresa. Al desactivarla se cierran sus campañas abiertas (las credenciales dejan de funcionar). */
+  app.patch('/admin/companies/:id', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = updateCompanySchema.safeParse(req.body);
+    if (!uuidParam(id) || !body.success) return reply.code(400).send({ error: 'Datos inválidos' });
+    const [co] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    if (!co) return reply.code(404).send({ error: 'Empresa no encontrada' });
+    const d = body.data;
+    if (d.code && d.code !== co.code) {
+      const [dup] = await db.select({ id: companies.id }).from(companies).where(eq(companies.code, d.code)).limit(1);
+      if (dup) return reply.code(409).send({ error: 'Ya existe una empresa con ese código.' });
+    }
+    const set: Partial<typeof companies.$inferInsert> = {};
+    if (d.name !== undefined) set.name = d.name;
+    if (d.nit !== undefined) set.nit = d.nit || null;
+    if (d.code !== undefined) set.code = d.code;
+    if (d.minGroupSize !== undefined) set.minGroupSize = d.minGroupSize;
+    if (d.active !== undefined) set.active = d.active;
+    let closed = 0;
+    await db.transaction(async (tx) => {
+      if (Object.keys(set).length) await tx.update(companies).set(set).where(eq(companies.id, id));
+      if (d.active === false && co.active) {
+        const open = await tx.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.companyId, id), eq(campaigns.status, 'open')));
+        closed = open.length;
+        if (open.length) await tx.update(campaigns).set({ status: 'closed', closedAt: new Date() }).where(inArray(campaigns.id, open.map((c) => c.id)));
+      }
+    });
+    if (closed) {
+      const access = await db.select({ id: users.id }).from(users).where(and(eq(users.companyId, id), eq(users.role, 'collaborator')));
+      for (const u of access) await revokeUserSessions(db, u.id);
+    }
+    await audit(db, req.auth!.user.id, d.active === undefined ? 'company.updated' : d.active ? 'company.activated' : 'company.deactivated', { type: 'company', id }, { fields: Object.keys(d), campaignsClosed: closed });
+    return { ok: true, campaignsClosed: closed };
+  });
+
+  /** Elimina una empresa solo si no tiene campañas ni cuentas de empresa cliente. Exige la contraseña. */
+  app.delete('/admin/companies/:id', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!uuidParam(id)) return reply.code(400).send({ error: 'Identificador inválido' });
+    const pw = (req.body as { password?: unknown } | null)?.password;
+    if (typeof pw !== 'string' || !(await verifyPassword(req.auth!.user.passwordHash, pw))) return reply.code(403).send({ error: 'Contraseña incorrecta.' });
+    const [co] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, id)).limit(1);
+    if (!co) return reply.code(404).send({ error: 'Empresa no encontrada' });
+    const [camp] = await db.select({ id: campaigns.id }).from(campaigns).where(eq(campaigns.companyId, id)).limit(1);
+    if (camp) return reply.code(409).send({ error: 'La empresa tiene campañas. Elimina primero sus campañas o desactívala.' });
+    const [acct] = await db.select({ id: users.id }).from(users).where(and(eq(users.companyId, id), eq(users.role, 'company'))).limit(1);
+    if (acct) return reply.code(409).send({ error: 'Hay cuentas de empresa cliente asociadas. Cámbiales la empresa o desactívalas primero.' });
+    await db.transaction(async (tx) => {
+      await tx.delete(psychologistCompanies).where(eq(psychologistCompanies.companyId, id));
+      await tx.delete(companies).where(eq(companies.id, id));
+    });
+    await audit(db, req.auth!.user.id, 'company.deleted', { type: 'company', id });
+    return { ok: true };
   });
 
   app.get('/companies', { preHandler: app.requireReady('admin', 'psychologist') }, async (req) => {

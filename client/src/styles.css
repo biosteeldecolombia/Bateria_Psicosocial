@@ -400,3 +400,5 @@ input[type='search'] { width: 100%; min-height: 2.75rem; padding: 0.55rem 0.75re
   .appnav [role='tab'] { padding: 0.5rem 0.7rem; }
   .kpi-main { padding-right: 3.8rem; }
 }
+
+.head-actions { display: inline-flex; align-items: center; gap: 0.25rem; }

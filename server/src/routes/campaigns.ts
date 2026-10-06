@@ -1,10 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import fs from 'node:fs';
 import { randomInt } from 'node:crypto';
-import { campaignStatusSchema, createCampaignSchema } from '@sanithelp/shared';
-import { campaigns, companies, psychologistCompanies, users } from '../db/schema.js';
+import { campaignStatusSchema, createCampaignSchema, updateCampaignSchema } from '@sanithelp/shared';
+import { campaigns, companies, consents, exportJobs, fichaAnswers, participants, psychologistCompanies, questionnaireAnswers, users } from '../db/schema.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
-import { generateTempPassword, hashPassword } from '../security/passwords.js';
+import { generateTempPassword, hashPassword, verifyPassword } from '../security/passwords.js';
 
 const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
 
@@ -43,11 +44,14 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
         : ids.length
           ? await db.select().from(campaigns).where(inArray(campaigns.companyId, ids)).orderBy(desc(campaigns.createdAt))
           : [];
+    const counts = new Map(
+      (await db.select({ id: participants.campaignId, n: sql<number>`count(*)::int` }).from(participants).groupBy(participants.campaignId)).map((r) => [r.id, r.n]),
+    );
     const names = new Map((await db.select({ id: companies.id, name: companies.name }).from(companies)).map((c) => [c.id, c.name]));
     const out = [];
     for (const c of rows) {
       const u = await accessUserOf(c.id);
-      out.push({ ...c, companyName: names.get(c.companyId) ?? '', accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
+      out.push({ ...c, participantCount: counts.get(c.id) ?? 0, companyName: names.get(c.companyId) ?? '', accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
     }
     return out;
   });
@@ -60,6 +64,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     if (ids !== 'all' && !ids.includes(body.data.companyId)) return reply.code(404).send({ error: 'Empresa no encontrada' });
     const [company] = await db.select().from(companies).where(eq(companies.id, body.data.companyId)).limit(1);
     if (!company) return reply.code(404).send({ error: 'Empresa no encontrada' });
+    if (!company.active) return reply.code(409).send({ error: 'La empresa está desactivada. Actívala para crear campañas.' });
 
     // Usuario legible y único: CÓDIGO-EMPRESA + 4 dígitos
     let username = '';
@@ -114,6 +119,56 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     const u = await accessUserOf(c.id);
     if (u && body.data.status === 'closed') await revokeUserSessions(db, u.id);
     await audit(db, actor.id, body.data.status === 'closed' ? 'campaign.closed' : 'campaign.reopened', { type: 'campaign', id: c.id });
+    return { ok: true };
+  });
+
+  /** Renombra la campaña. */
+  app.patch('/campaigns/:id', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = updateCampaignSchema.safeParse(req.body);
+    const actor = req.auth!.user;
+    const c = uuidParam(id) && body.success ? await manageable(id, actor.id, actor.role) : null;
+    if (!c || !body.success) return reply.code(404).send({ error: 'Campaña no encontrada' });
+    await db.update(campaigns).set({ name: body.data.name }).where(eq(campaigns.id, c.id));
+    await audit(db, actor.id, 'campaign.renamed', { type: 'campaign', id: c.id });
+    return { ok: true };
+  });
+
+  /**
+   * Elimina una campaña. Sin participantes: cualquier miembro del personal con acceso, con su contraseña.
+   * Con participantes: solo el administrador, con la campaña cerrada y escribiendo el nombre exacto;
+   * borra respuestas, fichas y constancias de consentimiento de forma definitiva (queda la auditoría).
+   */
+  app.delete('/campaigns/:id', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const actor = req.auth!.user;
+    const c = uuidParam(id) ? await manageable(id, actor.id, actor.role) : null;
+    if (!c) return reply.code(404).send({ error: 'Campaña no encontrada' });
+    const b = (req.body ?? {}) as { password?: unknown; confirmName?: unknown };
+    if (typeof b.password !== 'string' || !(await verifyPassword(actor.passwordHash, b.password))) return reply.code(403).send({ error: 'Contraseña incorrecta.' });
+    const people = await db.select({ id: participants.id }).from(participants).where(eq(participants.campaignId, c.id));
+    if (people.length) {
+      if (actor.role !== 'admin') return reply.code(403).send({ error: 'La campaña tiene participantes. Solo el administrador puede eliminarla.' });
+      if (c.status !== 'closed') return reply.code(409).send({ error: 'Cierra la campaña antes de eliminarla.' });
+      if (b.confirmName !== c.name) return reply.code(400).send({ error: 'Escribe el nombre exacto de la campaña para confirmar.' });
+    }
+    const jobs = await db.select({ filePath: exportJobs.filePath }).from(exportJobs).where(eq(exportJobs.campaignId, c.id));
+    const access = await db.select({ id: users.id }).from(users).where(and(eq(users.campaignId, c.id), eq(users.role, 'collaborator')));
+    await db.transaction(async (tx) => {
+      const ids = people.map((p) => p.id);
+      if (ids.length) {
+        await tx.delete(questionnaireAnswers).where(inArray(questionnaireAnswers.participantId, ids));
+        await tx.delete(fichaAnswers).where(inArray(fichaAnswers.participantId, ids));
+        await tx.delete(consents).where(inArray(consents.participantId, ids));
+      }
+      // Las sesiones se borran con el usuario (cascada) o quedan sin participante (set null).
+      await tx.delete(participants).where(eq(participants.campaignId, c.id));
+      await tx.delete(exportJobs).where(eq(exportJobs.campaignId, c.id));
+      if (access.length) await tx.delete(users).where(inArray(users.id, access.map((u) => u.id)));
+      await tx.delete(campaigns).where(eq(campaigns.id, c.id));
+    });
+    for (const j of jobs) if (j.filePath) fs.rmSync(j.filePath, { force: true });
+    await audit(db, actor.id, 'campaign.deleted', { type: 'campaign', id: c.id }, { participants: people.length });
     return { ok: true };
   });
 };

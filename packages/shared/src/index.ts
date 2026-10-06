@@ -76,6 +76,16 @@ export const createCompanySchema = z.object({
   minGroupSize: z.number().int().min(2).max(100).default(5),
 });
 
+export const updateCompanySchema = z.object({
+  name: z.string().trim().min(2).max(200).optional(),
+  nit: z.string().trim().max(30).optional(),
+  code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/).optional(),
+  minGroupSize: z.number().int().min(2).max(100).optional(),
+  active: z.boolean().optional(),
+});
+
+export const updateCampaignSchema = z.object({ name: z.string().trim().min(2).max(200) });
+
 /** Cuentas de personas (admin, psicóloga, empresa). Los colaboradores no tienen cuenta: usan la credencial de la campaña. */
 export const createUserSchema = z.object({
   role: z.enum(['admin', 'psychologist', 'company']),

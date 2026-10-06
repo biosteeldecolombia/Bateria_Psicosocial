@@ -7,7 +7,7 @@ import { EmptyState, Modal, RowMenu, SecretModal, StatusBadge, useAction, type S
 import { Users, type UserRow } from './Users';
 
 interface Company { id: string; name: string; code: string; nit: string | null; minGroupSize: number; active: boolean }
-interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; createdAt: string }
+interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; createdAt: string; participantCount: number }
 
 type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'perfil';
 
@@ -49,22 +49,23 @@ function ProfileCard({ onSaved }: { onSaved: () => void }) {
   );
 }
 
-function CompanyForm({ onDone, onClose }: { onDone: () => Promise<void>; onClose: () => void }) {
+function CompanyForm({ company, onDone, onClose }: { company: Company | null; onDone: () => Promise<void>; onClose: () => void }) {
   const act = useAction();
-  const [name, setName] = useState('');
-  const [code, setCode] = useState('');
-  const [nit, setNit] = useState('');
-  const [min, setMin] = useState(5);
+  const [name, setName] = useState(company?.name ?? '');
+  const [code, setCode] = useState(company?.code ?? '');
+  const [nit, setNit] = useState(company?.nit ?? '');
+  const [min, setMin] = useState(company?.minGroupSize ?? 5);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void act.run(async () => {
-      await api('POST', '/api/admin/companies', { name, code, ...(nit.trim() ? { nit: nit.trim() } : {}), minGroupSize: min });
+      if (company) await api('PATCH', `/api/admin/companies/${company.id}`, { name, code, nit: nit.trim(), minGroupSize: min });
+      else await api('POST', '/api/admin/companies', { name, code, ...(nit.trim() ? { nit: nit.trim() } : {}), minGroupSize: min });
       await onDone();
       onClose();
     });
   };
   return (
-    <Modal title="Nueva empresa" icon="building" onClose={onClose}>
+    <Modal title={company ? `Editar ${company.name}` : 'Nueva empresa'} icon={company ? 'edit' : 'building'} onClose={onClose}>
       {act.error && <div className="alert error" role="alert">{act.error}</div>}
       <form onSubmit={submit} noValidate>
         <div className="form-grid">
@@ -89,9 +90,68 @@ function CompanyForm({ onDone, onClose }: { onDone: () => Promise<void>; onClose
         </div>
         <div className="dialog-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn" disabled={act.busy || name.trim().length < 2 || code.length < 2}><Icon name="check" /> Crear empresa</button>
+          <button className="btn" disabled={act.busy || name.trim().length < 2 || code.length < 2}><Icon name="check" /> {company ? 'Guardar cambios' : 'Crear empresa'}</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+function RenameCampaign({ campaign, onDone, onClose }: { campaign: Campaign; onDone: () => Promise<void>; onClose: () => void }) {
+  const act = useAction();
+  const [name, setName] = useState(campaign.name);
+  return (
+    <Modal title="Editar campaña" icon="edit" size="sm" onClose={onClose}>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      <form
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act.run(async () => { await api('PATCH', `/api/campaigns/${campaign.id}`, { name }); await onDone(); onClose(); });
+        }}
+      >
+        <label htmlFor="rn-n">Nombre de la campaña</label>
+        <input id="rn-n" type="text" value={name} onChange={(e) => setName(e.target.value)} />
+        <div className="dialog-actions">
+          <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn" disabled={act.busy || name.trim().length < 2 || name.trim() === campaign.name}><Icon name="check" /> Guardar</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Confirmación de eliminación definitiva: pide la contraseña y, si se indica, escribir el nombre exacto. */
+function DeleteDialog({ title, warning, confirmName, blocked, onConfirm, onClose }: { title: string; warning: string; confirmName?: string; blocked?: string; onConfirm: (password: string, typed: string) => Promise<void>; onClose: () => void }) {
+  const act = useAction();
+  const [pwd, setPwd] = useState('');
+  const [typed, setTyped] = useState('');
+  return (
+    <Modal title={title} icon="alert" size="sm" onClose={onClose}>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      <p style={{ marginTop: 0 }}>{warning}</p>
+      {blocked ? <div className="alert error" role="status">{blocked}</div> : (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act.run(async () => { await onConfirm(pwd, typed); onClose(); });
+          }}
+        >
+          {confirmName && (
+            <>
+              <label htmlFor="dl-n">Escribe <strong>{confirmName}</strong> para confirmar</label>
+              <input id="dl-n" type="text" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+            </>
+          )}
+          <label htmlFor="dl-p">Tu contraseña</label>
+          <input id="dl-p" type="password" autoComplete="current-password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
+          <div className="dialog-actions">
+            <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+            <button className="btn danger" disabled={act.busy || !pwd || (!!confirmName && typed !== confirmName)}><Icon name="trash" /> Eliminar definitivamente</button>
+          </div>
+        </form>
+      )}
     </Modal>
   );
 }
@@ -156,6 +216,10 @@ export function Management({ me }: { me: MeResponse }) {
   const [newCompany, setNewCompany] = useState(false);
   const [newCampaign, setNewCampaign] = useState(false);
   const [newUser, setNewUser] = useState(false);
+  const [editCompany, setEditCompany] = useState<Company | null>(null);
+  const [delCompany, setDelCompany] = useState<Company | null>(null);
+  const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
+  const [delCampaign, setDelCampaign] = useState<Campaign | null>(null);
   const [coFilter, setCoFilter] = useState('');
   const [stFilter, setStFilter] = useState('');
   const [showInactive, setShowInactive] = useState(false);
@@ -325,7 +389,26 @@ export function Management({ me }: { me: MeResponse }) {
                     <article className="panel pad co-card" key={c.id}>
                       <div className="panel-head">
                         <h2 className="panel-title"><Icon name="building" size={20} /> {c.name}</h2>
-                        <StatusBadge on={c.active} onText="Activa" offText="Inactiva" />
+                        <span className="head-actions">
+                          <StatusBadge on={c.active} onText="Activa" offText="Inactiva" />
+                          {isAdmin && (
+                            <RowMenu
+                              label={`Más acciones para ${c.name}`}
+                              items={[
+                                { label: 'Editar empresa', icon: 'edit', onSelect: () => setEditCompany(c) },
+                                {
+                                  label: c.active ? 'Desactivar empresa' : 'Activar empresa', icon: 'power', danger: c.active, onSelect: () => void act.run(async () => {
+                                    const open = campaignsOf(c.id).filter((x) => x.status === 'open').length;
+                                    if (c.active && !window.confirm(`¿Desactivar ${c.name}?${open ? ` Se cerrarán sus ${open} campañas abiertas y sus credenciales dejarán de funcionar.` : ''}`)) return;
+                                    await api('PATCH', `/api/admin/companies/${c.id}`, { active: !c.active });
+                                    await load();
+                                  }),
+                                },
+                                { label: 'Eliminar empresa', icon: 'trash', danger: true, onSelect: () => setDelCompany(c) },
+                              ]}
+                            />
+                          )}
+                        </span>
                       </div>
                       <dl className="facts">
                         <div><dt>Código</dt><dd><code>{c.code}</code></dd></div>
@@ -336,7 +419,7 @@ export function Management({ me }: { me: MeResponse }) {
                       </dl>
                       <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
                         <button className="btn secondary sm" onClick={() => goCampaigns(c.id)}>Ver campañas <Icon name="arrow" /></button>
-                        <button className="btn sm" onClick={() => { setCoFilter(c.id); setNewCampaign(true); }}><Icon name="plus" /> Campaña</button>
+                        <button className="btn sm" disabled={!c.active} onClick={() => { setCoFilter(c.id); setNewCampaign(true); }}><Icon name="plus" /> Campaña</button>
                       </div>
                     </article>
                   );
@@ -393,6 +476,7 @@ export function Management({ me }: { me: MeResponse }) {
                           <RowMenu
                             label={`Más acciones para ${c.name}`}
                             items={[
+                              { label: 'Editar nombre', icon: 'edit', onSelect: () => setEditCampaign(c) },
                               {
                                 label: 'Nueva contraseña de acceso', icon: 'key', onSelect: () => void act.run(async () => {
                                   if (!window.confirm('Se generará una contraseña nueva y la anterior dejará de funcionar. ¿Continuar?')) return;
@@ -406,6 +490,7 @@ export function Management({ me }: { me: MeResponse }) {
                                   await load();
                                 }),
                               },
+                              { label: 'Eliminar campaña', icon: 'trash', danger: true, onSelect: () => setDelCampaign(c) },
                             ]}
                           />
                         </td>
@@ -444,8 +529,30 @@ export function Management({ me }: { me: MeResponse }) {
         )}
       </div>
 
-      {newCompany && <CompanyForm onDone={load} onClose={() => setNewCompany(false)} />}
+      {newCompany && <CompanyForm company={null} onDone={load} onClose={() => setNewCompany(false)} />}
       {newCampaign && <CampaignForm companies={activeCompanies} initialCompany={coFilter} onDone={load} onSecret={setSecret} onClose={() => setNewCampaign(false)} />}
+      {editCompany && <CompanyForm key={editCompany.id} company={editCompany} onDone={load} onClose={() => setEditCompany(null)} />}
+      {delCompany && (
+        <DeleteDialog
+          title={`Eliminar ${delCompany.name}`}
+          warning="Se eliminará la empresa de forma definitiva. Solo es posible si no tiene campañas ni cuentas de empresa cliente; si las tiene, desactívala en su lugar."
+          onConfirm={async (password) => { await api('DELETE', `/api/admin/companies/${delCompany.id}`, { password }); await Promise.all([load(), loadUsers()]); }}
+          onClose={() => setDelCompany(null)}
+        />
+      )}
+      {editCampaign && <RenameCampaign key={editCampaign.id} campaign={editCampaign} onDone={load} onClose={() => setEditCampaign(null)} />}
+      {delCampaign && (
+        <DeleteDialog
+          title={`Eliminar ${delCampaign.name}`}
+          warning={delCampaign.participantCount === 0
+            ? 'La campaña no tiene participantes. Se eliminará junto con su credencial de acceso.'
+            : `La campaña tiene ${delCampaign.participantCount} participantes. Se borrarán de forma definitiva sus respuestas, fichas y constancias de consentimiento. Esta acción no se puede deshacer; solo queda el registro de auditoría.`}
+          blocked={delCampaign.participantCount > 0 && !isAdmin ? 'Solo el administrador puede eliminar una campaña con participantes. Puedes cerrarla para que deje de recibir respuestas.' : delCampaign.participantCount > 0 && delCampaign.status === 'open' ? 'Cierra la campaña antes de eliminarla.' : undefined}
+          confirmName={delCampaign.participantCount > 0 ? delCampaign.name : undefined}
+          onConfirm={async (password, typed) => { await api('DELETE', `/api/campaigns/${delCampaign.id}`, { password, confirmName: typed }); await load(); }}
+          onClose={() => setDelCampaign(null)}
+        />
+      )}
       {secret && <SecretModal s={secret} onClose={() => setSecret(null)} />}
     </div>
   );

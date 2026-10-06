@@ -38,6 +38,7 @@ const PATHS: Record<string, ReactNode> = {
   dot: <circle cx="12" cy="12" r="4.5" fill="currentColor" />,
   ring: <circle cx="12" cy="12" r="5" />,
   alert: <path d="M12 4 21 19.5H3zM12 10v4.5M12 17h.01" />,
+  trash: <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6" />,
   folder: <path d="M3 6.5h6l2 2.5h10v10.5H3z" />,
 };
 
