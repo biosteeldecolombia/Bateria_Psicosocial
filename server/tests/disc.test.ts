@@ -148,4 +148,25 @@ describe('DISC', () => {
     expect((await psy.call('POST', `/api/participants/${id}/erase`, { password: psyPw })).status).toBe(200);
     expect((await psy.call('GET', `/api/campaigns/${campaignId}/disc`)).json.people).toHaveLength(0);
   });
+
+  it('el informe PDF se genera aunque la empresa no tenga psicóloga asignada (el administrador lo descarga con justificación)', async () => {
+    const co = await admin.call('POST', '/api/admin/companies', { name: 'Empresa sin psicologa', code: 'DSC2', minGroupSize: 5 });
+    const camp = await admin.call('POST', '/api/campaigns', { companyId: co.json.id, name: 'Ronda sin psicologa', assessments: ['disc'] });
+    expect(camp.status).toBe(201);
+    const cl = newClient(env);
+    await cl.call('POST', '/api/auth/login', { username: camp.json.username, password: camp.json.password });
+    await enter(cl, '4000030');
+    const all: Record<string, number> = {};
+    for (let g = 1; g <= DISC_GROUPS.length; g++) all[g] = encodeDisc(0, 3);
+    await cl.call('PUT', '/api/participation/questionnaires/disc', { answers: all, complete: true });
+    await cl.call('POST', '/api/participation/submit');
+    const q = '?justification=Soporte%20tecnico%20caso%2099';
+    const { people } = (await admin.call('GET', `/api/campaigns/${camp.json.id}/disc${q}`)).json;
+    const pdf = await env.app.inject({ method: 'GET', url: `/api/participants/${people[0].participantId}/disc.pdf${q}`, headers: { origin: 'http://localhost:3000', cookie: admin.cookie, 'x-csrf-token': admin.csrf } });
+    expect(pdf.statusCode).toBe(200);
+    expect(pdf.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+    // el expediente (con consentimiento firmado por la psicóloga) sigue exigiendo la psicóloga asignada
+    const exp = await env.app.inject({ method: 'GET', url: `/api/participants/${people[0].participantId}/expediente.pdf${q}`, headers: { origin: 'http://localhost:3000', cookie: admin.cookie, 'x-csrf-token': admin.csrf } });
+    expect(exp.statusCode).toBe(409);
+  });
 });

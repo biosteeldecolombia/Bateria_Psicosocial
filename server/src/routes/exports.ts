@@ -58,6 +58,16 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     };
   }
 
+  /** Para los informes de las evaluaciones individuales: el dato profesional es solo el pie de página, no debe impedir el informe. */
+  async function professionalOptional(actor: typeof users.$inferSelect, companyId: string): Promise<Professional> {
+    try {
+      return await professionalFor(actor, companyId);
+    } catch (e) {
+      if ((e as { statusCode?: number }).statusCode === 409) return actor.role === 'psychologist' ? { name: crypto.decrypt(actor.fullNameEnc), signed: false } : {};
+      throw e;
+    }
+  }
+
   // ---------- Individual ----------
   app.get('/participants/:id/expediente.pdf', { preHandler: staff }, async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -83,7 +93,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadDisc(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados DISC.' });
-    const bytes = await buildDiscReport(rec, await professionalFor(req.auth!.user, p.companyId), new Date());
+    const bytes = await buildDiscReport(rec, await professionalOptional(req.auth!.user, p.companyId), new Date());
     await audit(db, req.auth!.user.id, 'pdf.disc', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -100,7 +110,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadValanti(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados VALANTI.' });
-    const bytes = await buildValantiReport(rec, await professionalFor(req.auth!.user, p.companyId), new Date());
+    const bytes = await buildValantiReport(rec, await professionalOptional(req.auth!.user, p.companyId), new Date());
     await audit(db, req.auth!.user.id, 'pdf.valanti', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -117,7 +127,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadIndividual(db, crypto, c.id, 'pf16', id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no completó el 16PF.' });
-    const bytes = await buildPf16Sheet(rec, await professionalFor(req.auth!.user, p.companyId), new Date());
+    const bytes = await buildPf16Sheet(rec, await professionalOptional(req.auth!.user, p.companyId), new Date());
     await audit(db, req.auth!.user.id, 'pdf.pf16', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')

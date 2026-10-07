@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, getCsrf } from '../api';
 import { BulkExport, downloadFile } from './BulkExport';
 import { Icon, type IconName } from '../icons';
+import { DISC_PATTERN_LABELS, ReportRow, ScoreBar } from './Reports';
 
 /** Niveles con color Y texto Y símbolo (nunca solo color). */
 const LEVEL_ICON: IconName[] = ['check', 'circle', 'half', 'triangle', 'octagon'];
@@ -374,17 +375,31 @@ interface RegisterData {
   rows: (string | number | null)[][];
   participantIds: string[];
 }
+type Scale = 'D' | 'I' | 'S' | 'C';
 interface DiscPerson {
   participantId: string;
   person: { document: string; fullName: string };
-  scores: Record<'D' | 'I' | 'S' | 'C', number>;
-  segments: Record<'D' | 'I' | 'S' | 'C', number>;
+  date: string;
+  scores: Record<Scale, number>;
+  segments: Record<Scale, number>;
   dominant: string[];
-  pattern: { nombre: string } | null;
+  pattern: ({ nombre: string } & Record<string, string>) | null;
   keyValidated: boolean;
 }
 
-/** DISC: perfil individual de cada persona que completó la prueba. */
+const DISC_NAMES: Record<Scale, string> = { D: 'Dominancia', I: 'Influencia', S: 'Estabilidad', C: 'Cumplimiento' };
+const fmtDate = (d: string) => d.split('-').reverse().join('/');
+const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
+
+/** Botón de descarga de un PDF con su mensaje de error. */
+function PdfButton({ url, name, label, onError }: { url: string; name: string; label: string; onError: (m: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button className="btn secondary" disabled={busy} onClick={async () => { onError(''); setBusy(true); try { await downloadFile(url, name); } catch (e) { onError((e as Error).message); } finally { setBusy(false); } }}>{busy ? 'Generando…' : label}</button>
+  );
+}
+
+/** DISC: perfil individual de cada persona que completó la prueba, con el informe desplegable. */
 function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ people: DiscPerson[] }>(`/api/campaigns/${campaignId}/disc${qs()}`);
   const [dlErr, setDlErr] = useState('');
@@ -405,13 +420,31 @@ function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
             <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{scales.map((s) => <th key={s} scope="col">{s}</th>)}<th scope="col">Dominante</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
             <tbody>
               {people.map((p) => (
-                <tr key={p.participantId}>
-                  <td>{p.person.document}</td>
-                  <td>{p.person.fullName}</td>
-                  {scales.map((s) => <td key={s}>{p.scores[s] > 0 ? '+' : ''}{p.scores[s]} <span className="muted">(seg. {p.segments[s]})</span></td>)}
-                  <td>{p.pattern ? `${p.dominant[0]} · ${p.pattern.nombre}` : `Empate: ${p.dominant.join(', ')}`}</td>
-                  <td><button className="btn secondary" onClick={async () => { setDlErr(''); try { await downloadFile(`/api/participants/${p.participantId}/disc.pdf${qs()}`, `DISC_${p.person.document}.pdf`); } catch (e) { setDlErr((e as Error).message); } }}>Informe PDF</button></td>
-                </tr>
+                <ReportRow
+                  key={p.participantId}
+                  colSpan={4 + scales.length}
+                  cells={<>
+                    <td>{p.person.document}</td>
+                    <td>{p.person.fullName}</td>
+                    {scales.map((s) => <td key={s}>{signed(p.scores[s])} <span className="muted">(seg. {p.segments[s]})</span></td>)}
+                    <td>{p.pattern ? `${p.dominant[0]} · ${p.pattern.nombre}` : `Empate: ${p.dominant.join(', ')}`}</td>
+                  </>}
+                  actions={<PdfButton url={`/api/participants/${p.participantId}/disc.pdf${qs()}`} name={`DISC_${p.person.document}.pdf`} label="Informe PDF" onError={setDlErr} />}
+                >
+                  <h3>Informe DISC · {p.person.fullName}</h3>
+                  <p className="muted">Aplicado el {fmtDate(p.date)}. Puntaje relativo: +1 por cada MÁS y −1 por cada MENOS (de −28 a +28).{!p.keyValidated && ' Resultado provisional.'}</p>
+                  {scales.map((s) => <ScoreBar key={s} label={`${s} · ${DISC_NAMES[s]}`} value={p.scores[s]} min={-28} max={28} text={`${signed(p.scores[s])} (segmento ${p.segments[s]})`} />)}
+                  {p.pattern ? (
+                    <>
+                      <h4>Escala dominante: {p.dominant[0]} · Patrón «{p.pattern.nombre}»</h4>
+                      <dl className="report-dl">
+                        {DISC_PATTERN_LABELS.map(([k, label]) => <div key={k}><dt>{label}</dt><dd>{p.pattern![k]}</dd></div>)}
+                      </dl>
+                    </>
+                  ) : (
+                    <p><strong>Empate en la escala más alta ({p.dominant.join(', ')}).</strong> Se interpreta el perfil completo; no se asigna un solo patrón.</p>
+                  )}
+                </ReportRow>
               ))}
             </tbody>
           </table>
@@ -421,9 +454,9 @@ function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
   );
 }
 
-/** 16PF: quién lo completó, hoja de respuestas en PDF y exportación para la corrección en la plataforma del editor. */
+/** 16PF: quién lo completó, hoja de respuestas (en pantalla y en PDF) y exportación para la corrección en la plataforma del editor. */
 function Pf16View({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
-  const { data, error, loading } = useLoad<{ people: { participantId: string; person: { document: string; fullName: string }; date: string; answered: number }[] }>(`/api/campaigns/${campaignId}/pf16${qs()}`);
+  const { data, error, loading } = useLoad<{ people: { participantId: string; person: { document: string; fullName: string }; date: string; answered: number; answers: string }[] }>(`/api/campaigns/${campaignId}/pf16${qs()}`);
   const [dlErr, setDlErr] = useState('');
   if (loading && !data) return <p role="status">Cargando…</p>;
   if (error) return <div className="alert error" role="alert">{error}</div>;
@@ -437,22 +470,32 @@ function Pf16View({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
       {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
       <div className="row-between">
         <span />
-        <button className="btn" disabled={people.length === 0} onClick={async () => { setDlErr(''); try { await downloadFile(`/api/campaigns/${campaignId}/pf16.csv${qs()}`, 'Respuestas16PF.csv'); } catch (e) { setDlErr((e as Error).message); } }}>Descargar respuestas (CSV)</button>
+        <PdfButton url={`/api/campaigns/${campaignId}/pf16.csv${qs()}`} name="Respuestas16PF.csv" label="Descargar respuestas (CSV)" onError={setDlErr} />
       </div>
       {people.length === 0 ? <p className="muted">Todavía nadie ha completado el 16PF.</p> : (
         <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
           <table className="table">
             <caption className="sr-only">Personas que completaron el 16PF</caption>
-            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Respondidas</th><th scope="col">Fecha</th><th scope="col"><span className="sr-only">Hoja</span></th></tr></thead>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Respondidas</th><th scope="col">Fecha</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
             <tbody>
               {people.map((p) => (
-                <tr key={p.participantId}>
-                  <td>{p.person.document}</td>
-                  <td>{p.person.fullName}</td>
-                  <td>{p.answered}</td>
-                  <td>{p.date.split('-').reverse().join('/')}</td>
-                  <td><button className="btn secondary" onClick={async () => { setDlErr(''); try { await downloadFile(`/api/participants/${p.participantId}/pf16.pdf${qs()}`, `16PF_${p.person.document}.pdf`); } catch (e) { setDlErr((e as Error).message); } }}>Hoja PDF</button></td>
-                </tr>
+                <ReportRow
+                  key={p.participantId}
+                  colSpan={5}
+                  cells={<>
+                    <td>{p.person.document}</td>
+                    <td>{p.person.fullName}</td>
+                    <td>{p.answered}</td>
+                    <td>{fmtDate(p.date)}</td>
+                  </>}
+                  actions={<PdfButton url={`/api/participants/${p.participantId}/pf16.pdf${qs()}`} name={`16PF_${p.person.document}.pdf`} label="Hoja PDF" onError={setDlErr} />}
+                >
+                  <h3>Hoja de respuestas 16PF · {p.person.fullName}</h3>
+                  <p className="muted">Aplicado el {fmtDate(p.date)}. {p.answered} de {p.answers.length} cuestiones respondidas. Sin calificar.</p>
+                  <ol className="pf-grid" aria-label="Respuestas por cuestión">
+                    {p.answers.split('').map((a, i) => <li key={i}><span className="muted">{i + 1}</span> <strong>{a}</strong></li>)}
+                  </ol>
+                </ReportRow>
               ))}
             </tbody>
           </table>
@@ -466,14 +509,21 @@ const VALANTI_COLS = ['Verdad', 'Rectitud', 'Paz', 'Amor', 'No violencia'] as co
 interface ValantiPerson {
   participantId: string;
   person: { document: string; fullName: string };
+  date: string;
   total: Record<string, number>;
+  part1: Record<string, number>;
+  part2: Record<string, number>;
   standard: Record<string, number>;
+  distance: Record<string, number>;
+  band: Record<string, string>;
   preferred: string[];
+  norm: Record<string, { mean: number; sd: number }>;
+  descriptions: Record<string, string>;
   normValidated: boolean;
   normLabel: string;
 }
 
-/** VALANTI: perfil de valores de cada persona que completó la prueba. */
+/** VALANTI: perfil de valores de cada persona que completó la prueba, con el informe desplegable. */
 function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ people: ValantiPerson[] }>(`/api/campaigns/${campaignId}/valanti${qs()}`);
   const [dlErr, setDlErr] = useState('');
@@ -493,13 +543,38 @@ function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) 
             <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{VALANTI_COLS.map((v) => <th key={v} scope="col">{v}</th>)}<th scope="col">Preferido</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
             <tbody>
               {people.map((p) => (
-                <tr key={p.participantId}>
-                  <td>{p.person.document}</td>
-                  <td>{p.person.fullName}</td>
-                  {VALANTI_COLS.map((v) => <td key={v}>{p.total[v]} <span className="muted">({p.standard[v]})</span></td>)}
-                  <td>{p.preferred.join(', ')}</td>
-                  <td><button className="btn secondary" onClick={async () => { setDlErr(''); try { await downloadFile(`/api/participants/${p.participantId}/valanti.pdf${qs()}`, `VALANTI_${p.person.document}.pdf`); } catch (e) { setDlErr((e as Error).message); } }}>Informe PDF</button></td>
-                </tr>
+                <ReportRow
+                  key={p.participantId}
+                  colSpan={4 + VALANTI_COLS.length}
+                  cells={<>
+                    <td>{p.person.document}</td>
+                    <td>{p.person.fullName}</td>
+                    {VALANTI_COLS.map((v) => <td key={v}>{p.total[v]} <span className="muted">({p.standard[v]})</span></td>)}
+                    <td>{p.preferred.join(', ')}</td>
+                  </>}
+                  actions={<PdfButton url={`/api/participants/${p.participantId}/valanti.pdf${qs()}`} name={`VALANTI_${p.person.document}.pdf`} label="Informe PDF" onError={setDlErr} />}
+                >
+                  <h3>Informe VALANTI · {p.person.fullName}</h3>
+                  <p className="muted">Aplicado el {fmtDate(p.date)}. {!p.normValidated && 'Puntaje estándar provisional. '}Valor preferido (mayor puntaje directo): <strong>{p.preferred.join(', ')}</strong>{p.preferred.length > 1 ? ' (empate)' : ''}.</p>
+                  <div className="scroll" tabIndex={0} role="region" aria-label="Detalle del puntaje (desplázala con las flechas del teclado)">
+                    <table className="table">
+                      <thead><tr><th scope="col">Valor</th><th scope="col">Parte 1</th><th scope="col">Parte 2</th><th scope="col">Directo</th><th scope="col">Media</th><th scope="col">Desv.</th><th scope="col">Estándar</th><th scope="col">Interpretación</th><th scope="col">Distancia</th></tr></thead>
+                      <tbody>
+                        {VALANTI_COLS.map((v) => (
+                          <tr key={v}>
+                            <th scope="row">{v}</th><td>{p.part1[v]}</td><td>{p.part2[v]}</td><td><strong>{p.total[v]}</strong></td>
+                            <td>{p.norm[v]!.mean}</td><td>{p.norm[v]!.sd}</td><td><strong>{p.standard[v]}</strong></td><td>{p.band[v]}</td><td>{signed(p.distance[v]!)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {VALANTI_COLS.map((v) => <ScoreBar key={v} label={v} value={p.standard[v]!} min={20} max={80} text={`${p.standard[v]} (50 = media de la norma)`} />)}
+                  <h4>Interpretación de los valores</h4>
+                  <dl className="report-dl">
+                    {VALANTI_COLS.map((v) => <div key={v}><dt>{v} ({p.total[v]})</dt><dd>{p.descriptions[v]}</dd></div>)}
+                  </dl>
+                </ReportRow>
               ))}
             </tbody>
           </table>
@@ -508,6 +583,7 @@ function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) 
     </>
   );
 }
+
 
 function Register({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<RegisterData>(`/api/campaigns/${campaignId}/results${qs()}`);

@@ -1,5 +1,5 @@
 import { VALANTI_PAIRS } from '@sanithelp/shared';
-import { VALANTI_NORM, VALANTI_NORM_LABEL, scoreValanti, type ValantiResult } from '@sanithelp/scoring';
+import { VALANTI_DESCRIPTIONS, VALANTI_NORM, VALANTI_NORM_LABEL, scoreValanti, type ValantiResult } from '@sanithelp/scoring';
 import type { Db } from '../db/client.js';
 import type { Crypto } from '../security/crypto.js';
 import { loadIndividual, type IndividualRecord } from './individual.js';
@@ -29,6 +29,7 @@ export function valantiView(rec: ValantiRecord) {
     normValidated: r.normValidated,
     normLabel: VALANTI_NORM_LABEL,
     norm: VALANTI_NORM,
+    descriptions: VALANTI_DESCRIPTIONS,
     pairs: VALANTI_PAIRS.length,
   };
 }

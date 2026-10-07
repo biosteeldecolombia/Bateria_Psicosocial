@@ -183,7 +183,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const recs = await loadIndividual(db, crypto, c.id, 'pf16');
     await audit(db, req.auth!.user.id, 'results.pf16_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
-    return { people: recs.map((r) => ({ participantId: r.participantId, person: { document: r.document, fullName: r.fullName }, date: r.date, answered: Object.keys(r.answers).length })) };
+    return { people: recs.map((r) => ({ participantId: r.participantId, person: { document: r.document, fullName: r.fullName }, date: r.date, answered: Object.keys(r.answers).length, answers: PF16_ITEMS.map((_, i) => (r.answers[i + 1] === undefined ? '-' : 'ABC'[r.answers[i + 1]!])).join('') })) };
   });
 
   /**

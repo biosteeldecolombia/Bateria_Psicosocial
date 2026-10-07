@@ -4,7 +4,10 @@ import { api, ApiError, getCsrf } from '../api';
 /** Descarga un archivo pequeño (PDF individual) comprobando primero el estado de la respuesta. */
 export async function downloadFile(url: string, fallbackName: string) {
   const res = await fetch(url, { credentials: 'same-origin', headers: { 'x-csrf-token': getCsrf() } });
-  if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? 'No se pudo descargar el archivo.');
+  if (!res.ok) {
+    const j = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+    throw new Error(j?.message ?? j?.error ?? 'No se pudo descargar el archivo.');
+  }
   const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? fallbackName;
   const href = URL.createObjectURL(await res.blob());
   const a = document.createElement('a');

@@ -19,7 +19,7 @@ export const VALANTI_NORM: Record<ValantiValue, { mean: number; sd: number }> = 
   Amor: { mean: 16.68, sd: 5.41 },
   'No violencia': { mean: 21.22, sd: 7.19 },
 };
-export const VALANTI_NORM_LABEL = 'Norma nacional 1997 (según el repositorio de origen; sin fuente verificada)';
+export const VALANTI_NORM_LABEL = 'Norma nacional 1997, según el repositorio de origen y sin fuente verificada';
 export const VALANTI_NORM_VALIDATED = false;
 
 export interface ValantiResult {

@@ -406,3 +406,22 @@ input[type='search'] { width: 100%; min-height: 2.75rem; padding: 0.55rem 0.75re
 .mini-kpis { display: flex; flex-wrap: wrap; gap: 0.15rem 1rem; list-style: none; margin: 0.2rem 0 0; padding: 0; font-size: 0.85rem; color: var(--muted); }
 .mini-kpis strong { color: var(--text); font-size: 0.95rem; }
 .table td .mini-kpis { flex-wrap: nowrap; margin: 0; }
+
+/* Informes desplegables de las evaluaciones individuales */
+.report-row > td { padding: 0; background: var(--surface-2); }
+.report { padding: 1rem 1.25rem 1.25rem; }
+.report h3 { margin: 0 0 0.25rem; }
+.report h4 { margin: 1.25rem 0 0.5rem; }
+.scorebar { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr minmax(9rem, auto); align-items: center; gap: 0.75rem; margin: 0.4rem 0; }
+.scorebar-label { font-weight: 600; }
+.scorebar-track { display: block; height: 0.9rem; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.scorebar-fill { display: block; height: 100%; background: var(--brand-teal); }
+.report-dl { margin: 0; }
+.report-dl > div { display: grid; grid-template-columns: minmax(10rem, 16rem) 1fr; gap: 0.75rem; padding: 0.35rem 0; border-bottom: 1px solid var(--border); }
+.report-dl dt { font-weight: 600; }
+.report-dl dd { margin: 0; }
+.pf-grid { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(4.2rem, 1fr)); gap: 0.25rem 0.5rem; font-size: 0.9rem; }
+@media (max-width: 40rem) {
+  .scorebar { grid-template-columns: 1fr; gap: 0.15rem; }
+  .report-dl > div { grid-template-columns: 1fr; gap: 0.1rem; }
+}
