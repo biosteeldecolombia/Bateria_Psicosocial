@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api } from './api';
 import { Icon } from './icons';
 import { EmptyState, Modal, RowMenu, StatusBadge, useAction } from './ui';
+import { Loading } from './BrandLoader';
 
 export interface Company { id: string; name: string; code: string }
 export interface UserRow {
@@ -238,7 +239,7 @@ export function Users({ rows, loaded, companies, reload, onSecret, openNew, onCl
         </div>
       </div>
 
-      {!loaded ? <p className="muted" role="status">Cargando…</p> : shown.length === 0 ? <EmptyState icon="users" text="No hay usuarios que coincidan." /> : (
+      {!loaded ? <Loading /> : shown.length === 0 ? <EmptyState icon="users" text="No hay usuarios que coincidan." /> : (
         <div className="panel table-wrap">
           <table className="table">
             <caption className="sr-only">Usuarios, roles, empresas asignadas y estado</caption>

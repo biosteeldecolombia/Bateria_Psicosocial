@@ -3,6 +3,7 @@ import { api, ApiError, getCsrf } from '../api';
 import { BulkExport, downloadFile } from './BulkExport';
 import { Icon, type IconName } from '../icons';
 import { DISC_PATTERN_LABELS, ReportRow, ScoreBar } from './Reports';
+import { Loading } from '../BrandLoader';
 
 /** Niveles con color Y texto Y símbolo (nunca solo color). */
 const LEVEL_ICON: IconName[] = ['check', 'circle', 'half', 'triangle', 'octagon'];
@@ -260,7 +261,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
   const [rights, setRights] = useState<{ person: Participant; mode: 'edit' | 'erase' } | null>(null);
   const [repeat, setRepeat] = useState<Participant | null>(null);
   const [notice, setNotice] = useState('');
-  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const rows = data ?? [];
   const count = (f: (p: Participant) => boolean) => rows.filter(f).length;
@@ -355,7 +356,7 @@ export function SummaryTables({ s, levels }: { s: Summary; levels: { intra: stri
 
 function SummaryView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ levels: { intra: string[]; stress: string[] }; summary: Summary }>(`/api/campaigns/${campaignId}/summary${qs()}`);
-  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   if (!data) return null;
   return (
@@ -469,7 +470,7 @@ function PdfButton({ url, name, label, onError }: { url: string; name: string; l
 function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ people: DiscPerson[] }>(`/api/campaigns/${campaignId}/disc${qs()}`);
   const [dlErr, setDlErr] = useState('');
-  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const people = data?.people ?? [];
   const scales = ['D', 'I', 'S', 'C'] as const;
@@ -530,7 +531,7 @@ function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
 function Pf16View({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ people: { participantId: string; person: { document: string; fullName: string }; date: string; answered: number; answers: string }[] }>(`/api/campaigns/${campaignId}/pf16${qs()}`);
   const [dlErr, setDlErr] = useState('');
-  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const people = data?.people ?? [];
   return (
@@ -601,7 +602,7 @@ interface ValantiPerson {
 function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ people: ValantiPerson[] }>(`/api/campaigns/${campaignId}/valanti${qs()}`);
   const [dlErr, setDlErr] = useState('');
-  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const people = data?.people ?? [];
   const names = (l: { value: string; area: string }[]) => l.map((m) => `${m.value.toUpperCase()} (área ${m.area})`).join(' y ');
@@ -681,7 +682,7 @@ function Register({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
     }
   }, [campaignId, qs]);
 
-  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   if (!data) return null;
   const idx = (h: string) => data.headers.indexOf(h);
@@ -750,14 +751,14 @@ function Report({ id, qs, onClose }: { id: string; qs: (e?: string) => string; o
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
   return (
-    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby="rp-t">
+    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby="rp-t" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal wide">
         <div className="row-between">
           <h2 id="rp-t" style={{ margin: 0 }}>Informe individual</h2>
           <button className="btn secondary" autoFocus onClick={onClose}>Cerrar</button>
         </div>
         {error && <div className="alert error" role="alert">{error}</div>}
-        {!data && !error && <p role="status">Cargando…</p>}
+        {!data && !error && <Loading />}
         {data && (
           <>
             <p><strong>{data.person.fullName}</strong> · Documento {data.person.document} · Forma {data.form}</p>

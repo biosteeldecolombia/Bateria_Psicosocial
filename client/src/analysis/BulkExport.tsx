@@ -34,6 +34,15 @@ export function BulkExport({ campaignId, reason, areas, onClose }: { campaignId:
   const [error, setError] = useState('');
   const [job, setJob] = useState<Job | null>(null);
 
+  // Se puede cerrar con Esc o pulsando fuera salvo mientras se genera o espera la descarga (el archivo es de un solo uso)
+  const closable = !job || job.status === 'failed' || job.status === 'expired';
+  useEffect(() => {
+    if (!closable) return;
+    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [closable, onClose]);
+
   useEffect(() => {
     if (!job || ['done', 'failed', 'expired'].includes(job.status)) return;
     const t = setTimeout(async () => {
@@ -60,7 +69,7 @@ export function BulkExport({ campaignId, reason, areas, onClose }: { campaignId:
   };
 
   return (
-    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby="bx-t">
+    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby="bx-t" onMouseDown={(e) => closable && e.target === e.currentTarget && onClose()}>
       <div className="modal wide">
         <h2 id="bx-t">Descargar expedientes en PDF</h2>
         {!job ? (

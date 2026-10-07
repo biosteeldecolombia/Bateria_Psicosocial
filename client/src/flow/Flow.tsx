@@ -7,6 +7,7 @@ import { DiscQuestionnaire } from './DiscQuestionnaire';
 import { Pf16Questionnaire } from './Pf16Questionnaire';
 import { Questionnaire } from './Questionnaire';
 import { ValantiQuestionnaire } from './ValantiQuestionnaire';
+import { Loading } from '../BrandLoader';
 
 export interface FlowState {
   status: 'in_progress' | 'completed' | 'declined' | 'revoked';
@@ -56,7 +57,7 @@ export function Flow({ onLeave }: { onLeave: () => void }) {
   }, [stepKey]);
 
   if (error) return <div className="alert error" role="alert">{error}</div>;
-  if (!state) return <p role="status">Cargando tu avance…</p>;
+  if (!state) return <Loading label="Cargando tu avance…" />;
 
   if (submitted || state.status === 'completed') {
     return (

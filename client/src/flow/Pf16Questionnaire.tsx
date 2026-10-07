@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PF16_INSTRUCTIONS, PF16_ITEMS, PF16_LETTERS, PF16_TITLE } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
 import type { FlowState } from './Flow';
+import { Loading } from '../BrandLoader';
 
 const PER_PAGE = 20;
 const PAGES = Math.ceil(PF16_ITEMS.length / PER_PAGE);
@@ -65,7 +66,7 @@ export function Pf16Questionnaire({ onDone }: { onDone: (s: FlowState) => void }
   };
 
   if (error && !loaded) return <div className="alert error" role="alert">{error}</div>;
-  if (!loaded) return <p role="status">Cargando…</p>;
+  if (!loaded) return <Loading />;
 
   if (!started) {
     return (

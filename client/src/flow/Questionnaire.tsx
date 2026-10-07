@@ -3,6 +3,7 @@ import { applicableItems, type Gate, type Item, type QuestionnaireDef } from '@s
 import { api, ApiError } from '../api';
 import { usePrefs } from '../prefs';
 import type { FlowState } from './Flow';
+import { Loading } from '../BrandLoader';
 
 type Gates = { clients?: boolean; boss?: boolean };
 interface Page {
@@ -107,7 +108,7 @@ export function Questionnaire({ id, def, onDone }: { id: string; def: Questionna
   };
 
   if (error && !loaded) return <div className="alert error" role="alert">{error}</div>;
-  if (!loaded) return <p role="status">Cargando…</p>;
+  if (!loaded) return <Loading />;
 
   if (!started) {
     return (

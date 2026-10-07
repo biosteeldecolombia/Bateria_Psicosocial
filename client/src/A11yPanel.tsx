@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { Preferences } from '@sanithelp/shared';
 import { usePrefs } from './prefs';
 import { Icon } from './icons';
+import { useDismissOutside } from './ui';
 
 function Segmented<T extends string>({ legend, name, value, options, onChange }: { legend: string; name: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
@@ -36,6 +37,8 @@ export function A11yPanel() {
   const { prefs, setPrefs, reset } = usePrefs();
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  useDismissOutside(open, [panelRef, btnRef], () => setOpen(false));
   const set = <K extends keyof Preferences>(k: K, v: Preferences[K]) => setPrefs({ ...prefs, [k]: v });
 
   useEffect(() => {
@@ -56,9 +59,9 @@ export function A11yPanel() {
         <Icon name="accessibility" /> Accesibilidad
       </button>
       {open && (
-        <section id="a11y-panel" className="a11y-panel" aria-labelledby="a11y-title">
+        <section ref={panelRef} id="a11y-panel" className="a11y-panel" aria-labelledby="a11y-title">
           <h2 id="a11y-title">Accesibilidad</h2>
-          <p className="hint">Tus preferencias se guardan. Cierra con Esc.</p>
+          <p className="hint">Tus preferencias se guardan. Cierra con Esc o pulsando fuera.</p>
           <Segmented legend="Tema" name="theme" value={prefs.theme} onChange={(v) => set('theme', v)} options={[['system', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro'], ['contrast', 'Alto contraste']]} />
           <Segmented legend="Tipo de letra" name="font" value={prefs.font} onChange={(v) => set('font', v)} options={[['system', 'Del sistema'], ['atkinson', 'Atkinson (baja visión)'], ['lexend', 'Lexend'], ['dyslexic', 'OpenDyslexic (dislexia)'], ['serif', 'Con serifa']]} />
           <Slider label="Tamaño del texto" value={prefs.textScale} min={100} max={200} step={10} format={(n) => `${n} %`} onChange={(v) => set('textScale', v)} />

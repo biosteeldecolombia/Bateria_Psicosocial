@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { VALANTI_INSTRUCTIONS, VALANTI_PAIRS, VALANTI_PART1_COUNT, VALANTI_TITLE } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
 import type { FlowState } from './Flow';
+import { Loading } from '../BrandLoader';
 
 /** Páginas: parte 1 completa (preguntas 1 a 9) y parte 2 en dos páginas. */
 const PAGES: [number, number][] = [[1, VALANTI_PART1_COUNT], [VALANTI_PART1_COUNT + 1, 20], [21, VALANTI_PAIRS.length]];
@@ -68,7 +69,7 @@ export function ValantiQuestionnaire({ onDone }: { onDone: (s: FlowState) => voi
   };
 
   if (error && !loaded) return <div className="alert error" role="alert">{error}</div>;
-  if (!loaded) return <p role="status">Cargando…</p>;
+  if (!loaded) return <Loading />;
 
   if (!started) {
     return (

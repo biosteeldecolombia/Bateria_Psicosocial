@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DISC_GROUPS, DISC_INSTRUCTIONS, DISC_TITLE, decodeDisc, encodeDisc } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
 import type { FlowState } from './Flow';
+import { Loading } from '../BrandLoader';
 
 const PER_PAGE = 7;
 type Pick = { mas?: number; menos?: number };
@@ -82,7 +83,7 @@ export function DiscQuestionnaire({ onDone }: { onDone: (s: FlowState) => void }
   };
 
   if (error && !loaded) return <div className="alert error" role="alert">{error}</div>;
-  if (!loaded) return <p role="status">Cargando…</p>;
+  if (!loaded) return <Loading />;
 
   if (!started) {
     return (

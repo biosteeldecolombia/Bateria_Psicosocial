@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FICHA, FICHA_INTRO, validateFicha, type FichaAnswers, type FichaQuestion } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
 import type { FlowState } from './Flow';
+import { Loading } from '../BrandLoader';
 
 type Errors = Record<number, string>;
 
@@ -83,7 +84,7 @@ export function Ficha({ onDone }: { onDone: (s: FlowState) => void }) {
     }
   };
 
-  if (!loaded) return <p role="status">{topError || 'Cargando…'}</p>;
+  if (!loaded) return topError ? <p role="status">{topError}</p> : <Loading />;
 
   return (
     <section className="card" aria-labelledby="t">

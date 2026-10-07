@@ -8,6 +8,7 @@ import { Management } from './Management';
 import { Participation } from './Participation';
 import { CompanyHome } from './analysis/CompanyHome';
 import { Icon } from './icons';
+import { Backdrop, PRODUCT_NAME, Splash } from './BrandLoader';
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Administrador', psychologist: 'Psicóloga', collaborator: 'Colaborador', company: 'Empresa cliente' };
 
@@ -17,9 +18,9 @@ function Shell({ me, onLogout, wide, children }: { me: MeResponse | null; onLogo
     <>
       <a className="skip-link" href="#contenido" onClick={() => mainRef.current?.focus()}>Saltar al contenido</a>
       <header className="topbar">
-        <a className="brand" href="/" aria-label="Batería de Riesgo Psicosocial, Sanithelp: inicio">
+        <a className="brand" href="/" aria-label={`${PRODUCT_NAME}: inicio`}>
           <img src="/brand/logo_sanithelp_icono.webp" alt="" width="42" height="42" />
-          <span>Batería de Riesgo Psicosocial</span>
+          <span>{PRODUCT_NAME}</span>
         </a>
         {me && <span className="who"><Icon name="user" size={16} /> {me.fullName} · {ROLE_LABEL[me.role]}</span>}
         {me && <Help role={me.role} />}
@@ -63,19 +64,29 @@ function Login({ onMe }: { onMe: (m: MeResponse) => void }) {
   const [password, setPassword] = useState('');
   const { error, busy, submit } = useSubmit(async () => onMe(await api('POST', '/api/auth/login', { username, password })));
   return (
-    <section className="card narrow" aria-labelledby="t">
-      <img className="login-logo" src="/brand/logo_sanithelp_completo.webp" alt="Sanithelp" width="220" height="220" style={{ background: '#fff', borderRadius: 12 }} />
-      <h1 id="t">Ingresar</h1>
-      <p className="muted">Usa el usuario y la contraseña que te entregó Sanithelp. Si vas a responder la batería, es la credencial de tu empresa; después te identificarás con tu documento.</p>
-      <form onSubmit={submit} noValidate>
-        <ErrorBox msg={error} />
-        <label htmlFor="u">Usuario</label>
-        <input id="u" type="text" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-        <label htmlFor="p">Contraseña</label>
-        <input id="p" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <button className="btn block" disabled={busy || !username || !password}>{busy ? 'Ingresando…' : 'Ingresar'}</button>
-      </form>
-    </section>
+    <div className="auth-stage">
+      <Backdrop />
+      <section className="login-card" aria-labelledby="t">
+        <span className="hero-mark" aria-hidden="true">
+          <span className="hero-wave" />
+          <span className="hero-wave hero-wave-2" />
+          <img src="/brand/logo_sanithelp_icono.webp" alt="" width="96" height="96" />
+        </span>
+        <h1 id="t"><span className="eyebrow">Sanithelp</span> Evaluaciones Psicométricas</h1>
+        <p className="muted lead">Ingresa con el usuario y la contraseña que te entregó Sanithelp. Si vas a responder las evaluaciones, es la credencial de tu empresa; después te identificarás con tu documento.</p>
+        <form onSubmit={submit} noValidate aria-busy={busy}>
+          <ErrorBox msg={error} />
+          <label htmlFor="u">Usuario</label>
+          <input id="u" type="text" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+          <label htmlFor="p">Contraseña</label>
+          <input id="p" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <button className="btn block" disabled={busy || !username || !password}>
+            {busy && <span className="spinner" aria-hidden="true" />}
+            {busy ? 'Ingresando…' : 'Ingresar'}
+          </button>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -208,7 +219,7 @@ function Inner() {
   const extend = () => api<MeResponse>('POST', '/api/auth/keepalive').then(accept).catch(expired);
   const refresh = () => getMe().then(accept).catch(() => accept(null));
 
-  if (loading) return <Shell me={null}><p role="status">Cargando…</p></Shell>;
+  if (loading) return <Shell me={null}><Splash /></Shell>;
 
   let body: ReactNode;
   if (!me) body = <>{notice && <div className="alert ok" role="status">{notice}</div>}<Login onMe={(m) => { setNotice(''); accept(m); }} /></>;

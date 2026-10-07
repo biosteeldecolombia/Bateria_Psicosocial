@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Role } from '@sanithelp/shared';
 import { Icon } from './icons';
+import { useDismissOutside } from './ui';
 
 interface Topic { title: string; body: string[] }
 
@@ -37,6 +38,8 @@ const BY_ROLE: Record<Role, Topic[]> = { collaborator: COLLABORATOR, psychologis
 export function Help({ role }: { role: Role }) {
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  useDismissOutside(open, [panelRef, btnRef], () => setOpen(false));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && open) {
@@ -54,9 +57,9 @@ export function Help({ role }: { role: Role }) {
         <Icon name="help" /> Ayuda
       </button>
       {open && (
-        <section id="help-panel" className="a11y-panel" aria-labelledby="help-title">
+        <section ref={panelRef} id="help-panel" className="a11y-panel" aria-labelledby="help-title">
           <h2 id="help-title">Ayuda</h2>
-          <p className="hint">Cierra con Esc.</p>
+          <p className="hint">Cierra con Esc o pulsando fuera.</p>
           {BY_ROLE[role].map((t) => (
             <details key={t.title}>
               <summary>{t.title}</summary>

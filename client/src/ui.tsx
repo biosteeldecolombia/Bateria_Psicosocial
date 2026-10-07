@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ApiError } from './api';
 import { Icon, type IconName } from './icons';
 
@@ -20,8 +20,33 @@ export function useAction() {
   return { error, busy, run, setError };
 }
 
-/** Ventana flotante centrada. Cierra con Esc o al hacer clic fuera; devuelve el foco al cerrar. */
-export function Modal({ title, onClose, children, size = 'md', icon }: { title: string; onClose: () => void; children: ReactNode; size?: 'sm' | 'md' | 'lg'; icon?: IconName }) {
+/** Cierra una ventana flotante (panel o menú) al pulsar o tocar fuera de los elementos indicados. */
+export function useDismissOutside(open: boolean, refs: RefObject<HTMLElement | null>[], onClose: () => void) {
+  const refsRef = useRef(refs);
+  refsRef.current = refs;
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent | TouchEvent) => {
+      const t = e.target as Node;
+      if (refsRef.current.some((r) => r.current?.contains(t))) return;
+      closeRef.current();
+    };
+    document.addEventListener('mousedown', h);
+    document.addEventListener('touchstart', h);
+    return () => {
+      document.removeEventListener('mousedown', h);
+      document.removeEventListener('touchstart', h);
+    };
+  }, [open]);
+}
+
+/**
+ * Ventana flotante centrada. Cierra con Esc o al hacer clic fuera; devuelve el foco al cerrar.
+ * `dismissOnOutside={false}` la deja cerrar solo con sus botones o Esc (para datos que no se pueden recuperar).
+ */
+export function Modal({ title, onClose, children, size = 'md', icon, dismissOnOutside = true }: { title: string; onClose: () => void; children: ReactNode; size?: 'sm' | 'md' | 'lg'; icon?: IconName; dismissOnOutside?: boolean }) {
   const id = useId();
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -38,7 +63,7 @@ export function Modal({ title, onClose, children, size = 'md', icon }: { title: 
     };
   }, []);
   return (
-    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-back" onMouseDown={(e) => dismissOnOutside && e.target === e.currentTarget && onClose()}>
       <div ref={ref} className={`dialog ${size}`} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1}>
         <div className="dialog-head">
           <h2 id={id}>{icon && <Icon name={icon} size={20} />} {title}</h2>
@@ -52,12 +77,12 @@ export function Modal({ title, onClose, children, size = 'md', icon }: { title: 
 
 export interface Secret { title: string; username: string; password: string }
 
-/** Credenciales entregadas una sola vez, en el centro de la pantalla. */
+/** Credenciales entregadas una sola vez, en el centro de la pantalla. No se cierra al pulsar fuera: la contraseña no se vuelve a mostrar. */
 export function SecretModal({ s, onClose }: { s: Secret; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const text = `Usuario: ${s.username}\nContraseña: ${s.password}`;
   return (
-    <Modal title={s.title} icon="key" size="sm" onClose={onClose}>
+    <Modal title={s.title} icon="key" size="sm" onClose={onClose} dismissOnOutside={false}>
       <p className="muted" style={{ marginTop: 0 }}>Cópiala o anótala ahora: <strong>no se volverá a mostrar</strong>.</p>
       <dl className="secret">
         <dt>Usuario</dt>

@@ -5,6 +5,7 @@ import { Analysis } from './analysis/Analysis';
 import { Icon, type IconName } from './icons';
 import { EmptyState, Modal, RowMenu, SecretModal, StatusBadge, useAction, type Secret } from './ui';
 import { Users, type UserRow } from './Users';
+import { Loading } from './BrandLoader';
 
 interface Company { id: string; name: string; code: string; nit: string | null; minGroupSize: number; active: boolean }
 interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; assessments: string[]; createdAt: string; participantCount: number; stats: { started: number; completed: number; inProgress: number; declined: number; revoked: number } }
@@ -33,7 +34,7 @@ function ProfileCard({ onSaved }: { onSaved: () => void }) {
       .then((r) => { setDoc(r.professionalDocument); setReg(r.professionalRegistry); setSaved(!!r.professionalDocument && !!r.professionalRegistry); setLoaded(true); })
       .catch(() => setLoaded(true));
   }, []);
-  if (!loaded) return <p className="muted" role="status">Cargando…</p>;
+  if (!loaded) return <Loading />;
   return (
     <section className="panel pad" aria-labelledby="pf" style={{ maxWidth: '40rem' }}>
       <h2 id="pf" className="panel-title"><Icon name="user" size={20} /> Mi perfil profesional</h2>
@@ -400,7 +401,7 @@ export function Management({ me }: { me: MeResponse }) {
               </div>
               <label className="check"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Mostrar inactivas</label>
             </div>
-            {!loaded ? <p className="muted" role="status">Cargando…</p> : shownCompanies.length === 0 ? (
+            {!loaded ? <Loading /> : shownCompanies.length === 0 ? (
               <EmptyState icon="building" text={isAdmin ? 'Aún no hay empresas.' : 'Aún no tienes empresas asignadas. Pídele al administrador que te asigne una.'}>
                 {isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Crear empresa</button>}
               </EmptyState>
@@ -481,7 +482,7 @@ export function Management({ me }: { me: MeResponse }) {
                 </select>
               </div>
             </div>
-            {!loaded ? <p className="muted" role="status">Cargando…</p> : shownCampaigns.length === 0 ? (
+            {!loaded ? <Loading /> : shownCampaigns.length === 0 ? (
               <EmptyState icon="clipboard" text="No hay campañas que coincidan.">{companies.length > 0 && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}</EmptyState>
             ) : (
               <div className="panel table-wrap">
