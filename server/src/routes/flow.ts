@@ -6,17 +6,24 @@ import {
   CONSENT_BLOCKS,
   CONSENT_DATE,
   CONSENT_OPTIONS,
+  DISC_GROUPS,
+  PF16_ITEMS,
+  VALANTI_PAIRS,
   CONSENT_VERSION,
   FICHA,
   QUESTIONNAIRES,
   applicableItems,
+  consentAddendaFor,
   formFromCargo,
-  questionnairesFor,
+  instrumentsFor,
+  isValidDiscAnswer,
+  isValidPf16Answer,
+  isValidValantiAnswer,
   validateFicha,
   type FichaAnswers,
-  type QuestionnaireId,
+  type InstrumentId,
 } from '@sanithelp/shared';
-import { consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
+import { campaigns, consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
 import { audit } from '../auth/service.js';
 
 /** Hash del texto exacto que se muestra, para dejar constancia de qué versión aceptó la persona. */
@@ -24,12 +31,23 @@ export const CONSENT_TEXT_HASH = createHash('sha256')
   .update(JSON.stringify({ v: CONSENT_VERSION, d: CONSENT_DATE, b: CONSENT_BLOCKS, o: CONSENT_OPTIONS }))
   .digest('hex');
 
+/** Hash del texto que ve cada campaña: el base más los anexos de sus evaluaciones (sin anexos, es el hash de siempre). */
+export function consentTextFor(assessments: readonly string[]) {
+  const addenda = consentAddendaFor(assessments);
+  if (!addenda.length) return { hash: CONSENT_TEXT_HASH, version: CONSENT_VERSION, addenda };
+  const hash = createHash('sha256').update(JSON.stringify({ base: CONSENT_TEXT_HASH, a: addenda })).digest('hex');
+  return { hash, version: `${CONSENT_VERSION} + anexo ${addenda.map((a) => a.id.toUpperCase()).join('/')} (borrador)`, addenda };
+}
+
 interface StoredQ {
   answers: Record<string, number>;
   gates: { clients?: boolean; boss?: boolean };
 }
 
-const isId = (v: unknown): v is QuestionnaireId => typeof v === 'string' && v in QUESTIONNAIRES;
+const isId = (v: unknown): v is InstrumentId => v === 'disc' || v === 'valanti' || v === 'pf16' || (typeof v === 'string' && v in QUESTIONNAIRES);
+
+/** Cantidad de preguntas que debe responder la persona en un cuestionario. */
+const totalOf = (id: InstrumentId, gates: StoredQ['gates']) => (id === 'disc' ? DISC_GROUPS.length : id === 'valanti' ? VALANTI_PAIRS.length : id === 'pf16' ? PF16_ITEMS.length : applicableItems(QUESTIONNAIRES[id], gates).length);
 
 /**
  * Flujo del colaborador: consentimiento → ficha → cuestionarios → envío.
@@ -59,9 +77,18 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
     const [f] = await db.select().from(fichaAnswers).where(eq(fichaAnswers.participantId, pid)).limit(1);
     return f ? { data: JSON.parse(crypto.decrypt(f.dataEnc)) as FichaAnswers, complete: f.complete } : { data: {} as FichaAnswers, complete: false };
   }
-  async function qOf(pid: string, id: QuestionnaireId) {
+  async function qOf(pid: string, id: InstrumentId) {
     const [r] = await db.select().from(questionnaireAnswers).where(and(eq(questionnaireAnswers.participantId, pid), eq(questionnaireAnswers.instrument, id))).limit(1);
     return r ? { data: JSON.parse(crypto.decrypt(r.dataEnc)) as StoredQ, complete: r.complete } : { data: { answers: {}, gates: {} } as StoredQ, complete: false };
+  }
+
+  /** Evaluaciones asignadas a la campaña de la persona, y cuestionarios que le tocan según ellas. */
+  async function assessmentsOf(p: typeof participants.$inferSelect) {
+    const [c] = await db.select({ assessments: campaigns.assessments }).from(campaigns).where(eq(campaigns.id, p.campaignId)).limit(1);
+    return c?.assessments ?? ['psychosocial'];
+  }
+  async function planOf(p: typeof participants.$inferSelect) {
+    return instrumentsFor(await assessmentsOf(p), p.form);
   }
 
   /** Estado del avance. Solo estados y conteos de preguntas respondidas: nunca resultados. */
@@ -73,7 +100,7 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
       consent: 'authorized' | 'declined' | 'revoked' | null;
       ficha: { complete: boolean };
       form: 'A' | 'B' | null;
-      questionnaires: { id: QuestionnaireId; complete: boolean; answered: number; total: number }[];
+      questionnaires: { id: InstrumentId; complete: boolean; answered: number; total: number }[];
       canSubmit: boolean;
     } = {
       status: p.status,
@@ -84,9 +111,9 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
       canSubmit: false,
     };
     if (p.form) {
-      for (const id of questionnairesFor(p.form)) {
+      for (const id of await planOf(p)) {
         const q = await qOf(p.id, id);
-        const total = applicableItems(QUESTIONNAIRES[id], q.data.gates).length;
+        const total = totalOf(id, q.data.gates);
         out.questionnaires.push({ id, complete: q.complete, answered: Object.keys(q.data.answers).length, total });
       }
       out.canSubmit = out.consent === 'authorized' && f.complete && out.questionnaires.every((q) => q.complete);
@@ -106,7 +133,8 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
     return {
       version: CONSENT_VERSION,
       date: CONSENT_DATE,
-      hash: CONSENT_TEXT_HASH,
+      hash: consentTextFor(await assessmentsOf(p)).hash,
+      addenda: consentTextFor(await assessmentsOf(p)).addenda,
       fullName: nameParts(crypto, p).full,
       document: crypto.decrypt(p.documentEnc),
       decision: (await consentOf(p.id))?.decision ?? null,
@@ -117,11 +145,12 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
     const p = await me(req, reply);
     if (!p) return;
     const b = (req.body ?? {}) as { decision?: unknown; hash?: unknown };
-    if ((b.decision !== 'authorized' && b.decision !== 'declined') || b.hash !== CONSENT_TEXT_HASH) {
+    const text = consentTextFor(await assessmentsOf(p));
+    if ((b.decision !== 'authorized' && b.decision !== 'declined') || b.hash !== text.hash) {
       return reply.code(400).send({ error: 'Debes elegir una opción y haber leído la versión vigente del documento.' });
     }
     if (p.status !== 'in_progress' || (await consentOf(p.id))) return closed(reply);
-    await db.insert(consents).values({ participantId: p.id, decision: b.decision, version: CONSENT_VERSION, textHash: CONSENT_TEXT_HASH });
+    await db.insert(consents).values({ participantId: p.id, decision: b.decision, version: text.version, textHash: text.hash });
     if (b.decision === 'declined') await db.update(participants).set({ status: 'declined' }).where(eq(participants.id, p.id));
     await audit(db, req.auth!.user.id, b.decision === 'authorized' ? 'consent.authorized' : 'consent.declined', { type: 'participant', id: p.id });
     return stateOf({ ...p, status: b.decision === 'declined' ? 'declined' : p.status });
@@ -184,7 +213,7 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
       reply.code(409).send({ error: 'Primero completa la ficha de datos generales.' });
       return null;
     }
-    const order = questionnairesFor(p.form);
+    const order = await planOf(p);
     const idx = order.indexOf(id);
     if (idx < 0) {
       reply.code(404).send({ error: 'Cuestionario no encontrado' });
@@ -207,8 +236,9 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
   app.put('/questionnaires/:id', { preHandler: only, bodyLimit: 50_000 }, async (req, reply) => {
     const g = await guardQ(req, reply);
     if (!g) return;
-    const def = QUESTIONNAIRES[g.id];
     if ((await qOf(g.p.id, g.id)).complete) return closed(reply);
+    if (g.id === 'disc' || g.id === 'valanti' || g.id === 'pf16') return saveSimple(req, reply, g.p, g.id);
+    const def = QUESTIONNAIRES[g.id];
     const b = (req.body ?? {}) as { answers?: Record<string, unknown>; gates?: Record<string, unknown>; complete?: unknown };
     const answers: Record<string, number> = {};
     for (const [k, v] of Object.entries(b.answers ?? {})) {
@@ -243,6 +273,33 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
       .onConflictDoUpdate({ target: [questionnaireAnswers.participantId, questionnaireAnswers.instrument], set: { dataEnc, complete, updatedAt: new Date() } });
     return stateOf(g.p);
   });
+
+  /**
+   * Evaluaciones de una respuesta numérica por pregunta, sin compuertas.
+   * DISC: grupo → posición MÁS × 4 + posición MENOS (posiciones distintas). VALANTI: pareja → puntos de la frase A (0 a 3). 16PF: cuestión → índice de la opción (0 = A, 1 = B, 2 = C).
+   */
+  async function saveSimple(req: FastifyRequest, reply: FastifyReply, p: typeof participants.$inferSelect, instrument: 'disc' | 'valanti' | 'pf16') {
+    const count = instrument === 'disc' ? DISC_GROUPS.length : instrument === 'valanti' ? VALANTI_PAIRS.length : PF16_ITEMS.length;
+    const valid = instrument === 'disc' ? isValidDiscAnswer : instrument === 'valanti' ? isValidValantiAnswer : isValidPf16Answer;
+    const b = (req.body ?? {}) as { answers?: Record<string, unknown>; complete?: unknown };
+    const answers: Record<string, number> = {};
+    for (const [k, v] of Object.entries(b.answers ?? {})) {
+      const n = Number(k);
+      if (!Number.isInteger(n) || n < 1 || n > count || !valid(v)) return reply.code(400).send({ error: 'Respuesta inválida.' });
+      answers[k] = v;
+    }
+    const complete = b.complete === true;
+    if (complete) {
+      const missing = Array.from({ length: count }, (_, i) => i + 1).filter((n) => answers[String(n)] === undefined);
+      if (missing.length) return reply.code(400).send({ error: 'Faltan preguntas por responder.', missing });
+    }
+    const dataEnc = crypto.encrypt(JSON.stringify({ answers, gates: {} } satisfies StoredQ));
+    await db
+      .insert(questionnaireAnswers)
+      .values({ participantId: p.id, instrument, dataEnc, complete })
+      .onConflictDoUpdate({ target: [questionnaireAnswers.participantId, questionnaireAnswers.instrument], set: { dataEnc, complete, updatedAt: new Date() } });
+    return stateOf(p);
+  }
 
   // ---------- Envío ----------
   app.post('/submit', { preHandler: only }, async (req, reply) => {

@@ -6,6 +6,7 @@ import type { FlowState } from './Flow';
 interface ConsentInfo {
   version: string;
   hash: string;
+  addenda: { id: string; title: string; paragraphs: string[] }[];
   fullName: string;
   document: string;
 }
@@ -51,6 +52,12 @@ export function Consent({ onDone }: { onDone: (s: FlowState) => void }) {
         {CONSENT_BLOCKS.map((b, i) =>
           b.kind === 'h' ? <h2 key={i}>{b.text}</h2> : b.kind === 'li' ? <ul key={i}><li>{b.text}</li></ul> : <p key={i}>{b.text}</p>,
         )}
+        {info?.addenda.map((a) => (
+          <div key={a.id}>
+            <h2>{a.title}</h2>
+            {a.paragraphs.map((t, i) => <p key={i}>{t}</p>)}
+          </div>
+        ))}
       </div>
       <fieldset className="plain">
         <legend><strong>{CONSENT_DECISION_LEAD}</strong></legend>

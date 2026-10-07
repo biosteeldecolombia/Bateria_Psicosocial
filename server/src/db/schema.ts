@@ -28,6 +28,8 @@ export const campaigns = pgTable('campaigns', {
   name: text('name').notNull(),
   status: campaignStatusEnum('status').notNull().default('open'),
   consentVersion: text('consent_version').notNull().default('FP-PS-CI v01'),
+  /** Evaluaciones que se aplican en esta campaña (ver catálogo en @sanithelp/shared). */
+  assessments: jsonb('assessments').$type<string[]>().notNull().default(sql`'["psychosocial"]'::jsonb`),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
 });

@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { QUESTIONNAIRES, type QuestionnaireId } from '@sanithelp/shared';
+import { DISC_TITLE, PF16_TITLE, QUESTIONNAIRES, VALANTI_TITLE, type InstrumentId } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
 import { Consent } from './Consent';
 import { Ficha } from './Ficha';
+import { DiscQuestionnaire } from './DiscQuestionnaire';
+import { Pf16Questionnaire } from './Pf16Questionnaire';
 import { Questionnaire } from './Questionnaire';
+import { ValantiQuestionnaire } from './ValantiQuestionnaire';
 
 export interface FlowState {
   status: 'in_progress' | 'completed' | 'declined' | 'revoked';
   consent: 'authorized' | 'declined' | 'revoked' | null;
   ficha: { complete: boolean };
   form: 'A' | 'B' | null;
-  questionnaires: { id: QuestionnaireId; complete: boolean; answered: number; total: number }[];
+  questionnaires: { id: InstrumentId; complete: boolean; answered: number; total: number }[];
   canSubmit: boolean;
 }
 
@@ -21,6 +24,9 @@ const STEP_LABEL: Record<string, string> = {
   intra_B: 'Intralaboral',
   extra: 'Extralaboral',
   stress: 'Estrés',
+  disc: 'DISC',
+  valanti: 'VALANTI',
+  pf16: '16PF',
   submit: 'Envío',
 };
 
@@ -86,7 +92,7 @@ export function Flow({ onLeave }: { onLeave: () => void }) {
   const steps: { key: string; done: boolean }[] = [
     { key: 'consent', done: state.consent === 'authorized' },
     { key: 'ficha', done: state.ficha.complete },
-    ...(state.form ? state.questionnaires.map((q) => ({ key: q.id, done: q.complete })) : [{ key: 'intra_A', done: false }, { key: 'extra', done: false }, { key: 'stress', done: false }]),
+    ...state.questionnaires.map((q) => ({ key: q.id, done: q.complete })),
     { key: 'submit', done: false },
   ];
   const currentKey = state.consent !== 'authorized' ? 'consent' : !state.ficha.complete ? 'ficha' : nextQ ? nextQ.id : 'submit';
@@ -106,7 +112,7 @@ export function Flow({ onLeave }: { onLeave: () => void }) {
       <div tabIndex={-1} ref={titleRef} className="sr-only" style={{ outline: 'none' }}>Paso: {STEP_LABEL[currentKey]}</div>
       {currentKey === 'consent' && <Consent onDone={setState} />}
       {currentKey === 'ficha' && <Ficha onDone={setState} />}
-      {nextQ && state.consent === 'authorized' && state.ficha.complete && <Questionnaire key={nextQ.id} id={nextQ.id} def={QUESTIONNAIRES[nextQ.id]} onDone={setState} />}
+      {nextQ && state.consent === 'authorized' && state.ficha.complete && (nextQ.id === 'disc' ? <DiscQuestionnaire key="disc" onDone={setState} /> : nextQ.id === 'valanti' ? <ValantiQuestionnaire key="valanti" onDone={setState} /> : nextQ.id === 'pf16' ? <Pf16Questionnaire key="pf16" onDone={setState} /> : <Questionnaire key={nextQ.id} id={nextQ.id} def={QUESTIONNAIRES[nextQ.id]} onDone={setState} />)}
       {currentKey === 'submit' && <Submit state={state} onSubmitted={() => setSubmitted(true)} />}
     </>
   );
@@ -122,7 +128,7 @@ function Submit({ state, onSubmitted }: { state: FlowState; onSubmitted: () => v
       <ul>
         <li>Consentimiento informado</li>
         <li>Ficha de datos generales</li>
-        {state.questionnaires.map((q) => <li key={q.id}>{QUESTIONNAIRES[q.id].title.replace(' — ', ' · ')}</li>)}
+        {state.questionnaires.map((q) => <li key={q.id}>{(q.id === 'disc' ? DISC_TITLE : q.id === 'valanti' ? VALANTI_TITLE : q.id === 'pf16' ? PF16_TITLE : QUESTIONNAIRES[q.id].title).replace(' — ', ' · ')}</li>)}
       </ul>
       <p className="muted">Al enviar no podrás cambiar tus respuestas.</p>
       {error && <div className="alert error" role="alert">{error}</div>}

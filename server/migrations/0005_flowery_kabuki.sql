@@ -1,0 +1,1 @@
+ALTER TABLE "campaigns" ADD COLUMN "assessments" jsonb DEFAULT '["psychosocial"]'::jsonb NOT NULL;

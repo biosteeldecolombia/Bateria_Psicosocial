@@ -10,6 +10,12 @@ import { clinicalAccess } from '../auth/clinical.js';
 import { verifyPassword } from '../security/passwords.js';
 import { buildExpediente, loadExpedientes, type Professional } from '../pdf/expediente.js';
 import { PdfWorker } from '../pdf/pool.js';
+import { buildDiscReport } from '../pdf/disc.js';
+import { loadDisc } from '../results/disc.js';
+import { buildValantiReport } from '../pdf/valanti.js';
+import { loadValanti } from '../results/valanti.js';
+import { buildPf16Sheet } from '../pdf/pf16.js';
+import { loadIndividual } from '../results/individual.js';
 
 const EXPORT_DIR = path.join(os.tmpdir(), 'sanithelp-exports');
 const TTL_MS = 30 * 60_000;
@@ -65,6 +71,57 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     return reply
       .header('Content-Type', 'application/pdf')
       .header('Content-Disposition', `attachment; filename="Expediente_${data!.document}.pdf"`)
+      .send(Buffer.from(bytes));
+  });
+
+  /** Informe DISC individual en PDF. */
+  app.get('/participants/:id/disc.pdf', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const c = await clinicalAccess(db, req, reply, p.campaignId);
+    if (!c) return;
+    const [rec] = await loadDisc(db, crypto, c.id, id);
+    if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados DISC.' });
+    const bytes = await buildDiscReport(rec, await professionalFor(req.auth!.user, p.companyId), new Date());
+    await audit(db, req.auth!.user.id, 'pdf.disc', { type: 'participant', id });
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="DISC_${rec.document}.pdf"`)
+      .send(Buffer.from(bytes));
+  });
+
+  /** Informe VALANTI individual en PDF. */
+  app.get('/participants/:id/valanti.pdf', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const c = await clinicalAccess(db, req, reply, p.campaignId);
+    if (!c) return;
+    const [rec] = await loadValanti(db, crypto, c.id, id);
+    if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados VALANTI.' });
+    const bytes = await buildValantiReport(rec, await professionalFor(req.auth!.user, p.companyId), new Date());
+    await audit(db, req.auth!.user.id, 'pdf.valanti', { type: 'participant', id });
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="VALANTI_${rec.document}.pdf"`)
+      .send(Buffer.from(bytes));
+  });
+
+  /** Hoja de respuestas del 16PF en PDF (sin calificar). */
+  app.get('/participants/:id/pf16.pdf', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const c = await clinicalAccess(db, req, reply, p.campaignId);
+    if (!c) return;
+    const [rec] = await loadIndividual(db, crypto, c.id, 'pf16', id);
+    if (!rec) return reply.code(404).send({ error: 'Esta persona aún no completó el 16PF.' });
+    const bytes = await buildPf16Sheet(rec, await professionalFor(req.auth!.user, p.companyId), new Date());
+    await audit(db, req.auth!.user.id, 'pdf.pf16', { type: 'participant', id });
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="16PF_${rec.document}.pdf"`)
       .send(Buffer.from(bytes));
   });
 

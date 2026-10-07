@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { MeResponse } from '@sanithelp/shared';
+import { ASSESSMENTS, ASSESSMENT_IDS, type AssessmentId, type MeResponse } from '@sanithelp/shared';
 import { api } from './api';
 import { Analysis } from './analysis/Analysis';
 import { Icon, type IconName } from './icons';
@@ -7,7 +7,7 @@ import { EmptyState, Modal, RowMenu, SecretModal, StatusBadge, useAction, type S
 import { Users, type UserRow } from './Users';
 
 interface Company { id: string; name: string; code: string; nit: string | null; minGroupSize: number; active: boolean }
-interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; createdAt: string; participantCount: number; stats: { started: number; completed: number; inProgress: number; declined: number; revoked: number } }
+interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; assessments: string[]; createdAt: string; participantCount: number; stats: { started: number; completed: number; inProgress: number; declined: number; revoked: number } }
 
 /** Totales de respuestas de una campaña, visibles sin abrir los resultados. */
 function CampaignStats({ s }: { s: Campaign['stats'] }) {
@@ -170,10 +170,12 @@ function CampaignForm({ companies, initialCompany, onDone, onSecret, onClose }: 
   const act = useAction();
   const [companyId, setCompanyId] = useState(initialCompany || companies[0]?.id || '');
   const [name, setName] = useState('');
+  const [assessments, setAssessments] = useState<AssessmentId[]>(['psychosocial']);
+  const toggle = (id: AssessmentId) => setAssessments((a) => (a.includes(id) ? a.filter((x) => x !== id) : [...a, id]));
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void act.run(async () => {
-      const r = await api<{ username: string; password: string }>('POST', '/api/campaigns', { companyId, name });
+      const r = await api<{ username: string; password: string }>('POST', '/api/campaigns', { companyId, name, assessments });
       await onDone();
       onClose();
       onSecret({ title: 'Credencial de la campaña creada', ...r });
@@ -190,10 +192,22 @@ function CampaignForm({ companies, initialCompany, onDone, onSecret, onClose }: 
           </select>
           <label htmlFor="cm-n">Nombre de la campaña</label>
           <input id="cm-n" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Ronda 2026" />
+          <fieldset>
+            <legend>Evaluaciones que se aplicarán</legend>
+            {ASSESSMENT_IDS.map((id) => {
+              const a = ASSESSMENTS[id];
+              return (
+                <label key={id} className="check" style={{ opacity: a.available ? 1 : 0.6 }}>
+                  <input type="checkbox" checked={assessments.includes(id)} disabled={!a.available} onChange={() => toggle(id)} />
+                  <span><strong>{a.title}</strong>{!a.available && <em> · próximamente</em>}<br /><small className="muted">{a.description}</small></span>
+                </label>
+              );
+            })}
+          </fieldset>
           <p className="muted">Se genera la credencial que entregas a los colaboradores; todos la comparten y se identifican con su documento.</p>
           <div className="dialog-actions">
             <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
-            <button className="btn" disabled={act.busy || name.trim().length < 2 || !companyId}><Icon name="check" /> Crear y generar credencial</button>
+            <button className="btn" disabled={act.busy || name.trim().length < 2 || !companyId || assessments.length === 0}><Icon name="check" /> Crear y generar credencial</button>
           </div>
         </form>
       )}
@@ -442,7 +456,7 @@ export function Management({ me }: { me: MeResponse }) {
         {tab === 'campanas' && (analysis ? (
           <>
             <button className="btn secondary sm" style={{ marginBottom: '0.75rem' }} onClick={() => setAnalysis(null)}><Icon name="back" /> Volver a campañas</button>
-            <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} isAdmin={isAdmin} onClose={() => setAnalysis(null)} />
+            <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} assessments={analysis.assessments} isAdmin={isAdmin} onClose={() => setAnalysis(null)} />
           </>
         ) : (
           <>
@@ -473,12 +487,13 @@ export function Management({ me }: { me: MeResponse }) {
               <div className="panel table-wrap">
                 <table className="table">
                   <caption className="sr-only">Campañas y su credencial de acceso</caption>
-                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Usuario de acceso</th><th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Evaluaciones</th><th scope="col">Usuario de acceso</th><th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
                   <tbody>
                     {shownCampaigns.map((c) => (
                       <tr key={c.id}>
                         <td>{c.companyName}</td>
                         <td><strong>{c.name}</strong></td>
+                        <td>{c.assessments.map((a) => <span key={a} className="chip">{ASSESSMENTS[a as AssessmentId]?.title ?? a}</span>)}</td>
                         <td><code>{c.accessUsername}</code></td>
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>

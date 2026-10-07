@@ -88,7 +88,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     if (!username) return reply.code(500).send({ error: 'No se pudo generar un usuario único. Intenta de nuevo.' });
 
     const password = generateTempPassword(10);
-    const [campaign] = await db.insert(campaigns).values({ companyId: company.id, name: body.data.name }).returning();
+    const [campaign] = await db.insert(campaigns).values({ companyId: company.id, name: body.data.name, assessments: [...new Set(body.data.assessments)] }).returning();
     await db.insert(users).values({
       role: 'collaborator',
       usernameBlind: crypto.blindIndex(username),
@@ -98,7 +98,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       campaignId: campaign!.id,
       passwordHash: await hashPassword(password),
     });
-    await audit(db, actor.id, 'campaign.created', { type: 'campaign', id: campaign!.id });
+    await audit(db, actor.id, 'campaign.created', { type: 'campaign', id: campaign!.id }, { assessments: campaign!.assessments });
     // La contraseña se muestra una sola vez.
     return reply.code(201).send({ id: campaign!.id, username, password });
   });

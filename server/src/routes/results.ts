@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { nameParts } from '../results/names.js';
 import { eq, inArray } from 'drizzle-orm';
+import { PF16_ITEMS } from '@sanithelp/shared';
 import {
   DOMAIN_BLOCKS,
   GROUPING_FIELDS,
@@ -21,6 +22,9 @@ import { audit } from '../auth/service.js';
 import { manageableCampaign } from '../auth/access.js';
 import { clinicalAccess as clinical } from '../auth/clinical.js';
 import { loadRecords } from '../results/service.js';
+import { discView, loadDisc } from '../results/disc.js';
+import { loadValanti, valantiView } from '../results/valanti.js';
+import { loadIndividual } from '../results/individual.js';
 import { newResumeCode, normalizeCode } from './participation.js';
 
 const csvCell = (v: unknown) => {
@@ -71,7 +75,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
           status: p.status,
           consent: cs ? (cs.revokedAt ? 'revoked' : cs.decision) : null,
           form: p.form,
-          progress: { ficha: fichaBy.get(p.id) ?? false, intralaboral: done.some((x) => x.startsWith('intra')), extralaboral: done.includes('extra'), estres: done.includes('stress') },
+          progress: { ficha: fichaBy.get(p.id) ?? false, intralaboral: done.some((x) => x.startsWith('intra')), extralaboral: done.includes('extra'), estres: done.includes('stress'), disc: done.includes('disc'), valanti: done.includes('valanti'), pf16: done.includes('pf16') },
           startedAt: p.createdAt,
           submittedAt: p.submittedAt,
         };
@@ -150,6 +154,54 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     const rows = filterRows(all, f, value);
     await audit(db, req.auth!.user.id, 'results.domains', { type: 'campaign', id: c.id });
     return { field: f, value, people: rows.length, interventionLevels: INTERVENTION_LEVELS, tables: domainTables(rows) };
+  });
+
+  /** DISC: perfil de cada persona que completó la prueba (para la psicóloga). */
+  app.get('/campaigns/:id/disc', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const c = await clinicalAccess(req, reply, id);
+    if (!c) return;
+    const recs = await loadDisc(db, crypto, c.id);
+    await audit(db, req.auth!.user.id, 'results.disc_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
+    return { people: recs.map(discView) };
+  });
+
+  /** VALANTI: perfil de valores de cada persona que completó la prueba (para la psicóloga). */
+  app.get('/campaigns/:id/valanti', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const c = await clinicalAccess(req, reply, id);
+    if (!c) return;
+    const recs = await loadValanti(db, crypto, c.id);
+    await audit(db, req.auth!.user.id, 'results.valanti_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
+    return { people: recs.map(valantiView) };
+  });
+
+  /** 16PF: quién completó el cuestionario (la calificación no está incluida: requiere las plantillas y baremos del editor). */
+  app.get('/campaigns/:id/pf16', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const c = await clinicalAccess(req, reply, id);
+    if (!c) return;
+    const recs = await loadIndividual(db, crypto, c.id, 'pf16');
+    await audit(db, req.auth!.user.id, 'results.pf16_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
+    return { people: recs.map((r) => ({ participantId: r.participantId, person: { document: r.document, fullName: r.fullName }, date: r.date, answered: Object.keys(r.answers).length })) };
+  });
+
+  /**
+   * Respuestas del 16PF para la corrección en la plataforma del editor: una fila por persona, una columna por cuestión
+   * con 1 (A), 2 (B), 3 (C) o 0 (en blanco).
+   */
+  app.get('/campaigns/:id/pf16.csv', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const c = await clinicalAccess(req, reply, id);
+    if (!c) return;
+    const recs = await loadIndividual(db, crypto, c.id, 'pf16');
+    const head = ['Documento', 'Nombre', ...PF16_ITEMS.map((_, i) => String(i + 1))];
+    const lines = [head.map(csvCell).join(';'), ...recs.map((r) => [r.document, r.fullName, ...PF16_ITEMS.map((_, i) => (r.answers[i + 1] === undefined ? 0 : r.answers[i + 1]! + 1))].map(csvCell).join(';'))];
+    await audit(db, req.auth!.user.id, 'results.exported', { type: 'campaign', id: c.id }, { people: recs.length, format: 'csv-pf16' });
+    return reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', 'attachment; filename="Respuestas16PF.csv"')
+      .send('﻿' + lines.join('\r\n'));
   });
 
   /** Informe individual de una persona (para la psicóloga). */

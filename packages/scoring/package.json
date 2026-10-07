@@ -8,5 +8,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sanithelp/shared": "^0.1.0"
   }
 }

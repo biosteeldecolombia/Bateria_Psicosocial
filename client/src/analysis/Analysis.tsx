@@ -41,24 +41,32 @@ interface Participant {
   status: string;
   consent: string | null;
   form: string | null;
-  progress: { ficha: boolean; intralaboral: boolean; extralaboral: boolean; estres: boolean };
+  progress: { ficha: boolean; intralaboral: boolean; extralaboral: boolean; estres: boolean; disc: boolean; valanti: boolean; pf16: boolean };
   submittedAt: string | null;
 }
 
 const STATUS: Record<string, string> = { in_progress: 'En curso', completed: 'Completó', declined: 'No autorizó', revoked: 'Revocó' };
 const CONSENT: Record<string, string> = { authorized: 'Autorizó', declined: 'No autorizó', revoked: 'Revocó' };
 
-type Tab = 'participants' | 'summary' | 'group' | 'domains' | 'register';
+type Tab = 'participants' | 'summary' | 'group' | 'domains' | 'register' | 'disc' | 'valanti' | 'pf16';
 const TABS: [Tab, string][] = [
   ['participants', 'Participantes'],
   ['summary', 'Resumen total'],
   ['group', 'Resumen por grupo'],
   ['domains', 'Dominios y dimensiones'],
   ['register', 'Registro individual'],
+  ['disc', 'DISC'],
+  ['valanti', 'VALANTI'],
+  ['pf16', '16PF'],
 ];
 
-export function Analysis({ campaignId, campaignName, isAdmin, onClose }: { campaignId: string; campaignName: string; isAdmin: boolean; onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('summary');
+export function Analysis({ campaignId, campaignName, assessments, isAdmin, onClose }: { campaignId: string; campaignName: string; assessments: string[]; isAdmin: boolean; onClose: () => void }) {
+  const hasPsy = assessments.includes('psychosocial');
+  const hasDisc = assessments.includes('disc');
+  const hasValanti = assessments.includes('valanti');
+  const hasPf16 = assessments.includes('pf16');
+  const tabs = TABS.filter(([k]) => (k === 'disc' ? hasDisc : k === 'valanti' ? hasValanti : k === 'pf16' ? hasPf16 : k === 'participants' || hasPsy));
+  const [tab, setTab] = useState<Tab>(hasPsy ? 'summary' : 'participants');
   const [reason, setReason] = useState('');
   const [reasonOk, setReasonOk] = useState(!isAdmin);
 
@@ -70,9 +78,9 @@ export function Analysis({ campaignId, campaignName, isAdmin, onClose }: { campa
   };
 
   const onKey = (e: React.KeyboardEvent) => {
-    const i = TABS.findIndex(([k]) => k === tab);
-    if (e.key === 'ArrowRight') setTab(TABS[(i + 1) % TABS.length]![0]);
-    if (e.key === 'ArrowLeft') setTab(TABS[(i + TABS.length - 1) % TABS.length]![0]);
+    const i = tabs.findIndex(([k]) => k === tab);
+    if (e.key === 'ArrowRight') setTab(tabs[(i + 1) % tabs.length]![0]);
+    if (e.key === 'ArrowLeft') setTab(tabs[(i + tabs.length - 1) % tabs.length]![0]);
   };
 
   return (
@@ -92,7 +100,7 @@ export function Analysis({ campaignId, campaignName, isAdmin, onClose }: { campa
       {reasonOk && (
         <>
           <div role="tablist" aria-label="Secciones del análisis" className="tabs" onKeyDown={onKey}>
-            {TABS.map(([k, label]) => (
+            {tabs.map(([k, label]) => (
               <button key={k} role="tab" id={`tab-${k}`} aria-selected={tab === k} aria-controls={`panel-${k}`} tabIndex={tab === k ? 0 : -1} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
             ))}
           </div>
@@ -102,6 +110,9 @@ export function Analysis({ campaignId, campaignName, isAdmin, onClose }: { campa
             {tab === 'group' && <GroupView campaignId={campaignId} qs={q} kind="summary" />}
             {tab === 'domains' && <GroupView campaignId={campaignId} qs={q} kind="domains" />}
             {tab === 'register' && <Register campaignId={campaignId} qs={q} />}
+            {tab === 'disc' && <DiscView campaignId={campaignId} qs={q} />}
+            {tab === 'valanti' && <ValantiView campaignId={campaignId} qs={q} />}
+            {tab === 'pf16' && <Pf16View campaignId={campaignId} qs={q} />}
           </div>
         </>
       )}
@@ -228,7 +239,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                   <td>{STATUS[p.status] ?? p.status}</td>
                   <td>{p.consent ? CONSENT[p.consent] : 'Pendiente'}</td>
                   <td>{p.form ?? '—'}</td>
-                  <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés'].filter(Boolean).join(' · ') || '—'}</td>
+                  <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés', p.progress.disc && 'DISC', p.progress.valanti && 'VALANTI', p.progress.pf16 && '16PF'].filter(Boolean).join(' · ') || '—'}</td>
                   <td>
                     {p.consent && (
                       <button className="btn secondary" onClick={async () => { setPdfErr(''); try { await downloadFile(`/api/participants/${p.id}/expediente.pdf${qs()}`, `Expediente_${p.document}.pdf`); } catch (e) { setPdfErr((e as Error).message); } }}>PDF</button>
@@ -363,6 +374,141 @@ interface RegisterData {
   rows: (string | number | null)[][];
   participantIds: string[];
 }
+interface DiscPerson {
+  participantId: string;
+  person: { document: string; fullName: string };
+  scores: Record<'D' | 'I' | 'S' | 'C', number>;
+  segments: Record<'D' | 'I' | 'S' | 'C', number>;
+  dominant: string[];
+  pattern: { nombre: string } | null;
+  keyValidated: boolean;
+}
+
+/** DISC: perfil individual de cada persona que completó la prueba. */
+function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
+  const { data, error, loading } = useLoad<{ people: DiscPerson[] }>(`/api/campaigns/${campaignId}/disc${qs()}`);
+  const [dlErr, setDlErr] = useState('');
+  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (error) return <div className="alert error" role="alert">{error}</div>;
+  const people = data?.people ?? [];
+  const scales = ['D', 'I', 'S', 'C'] as const;
+  return (
+    <>
+      {people.some((p) => !p.keyValidated) && (
+        <div className="alert error" role="status">Resultados PROVISIONALES: la clave de calificación del DISC (qué escala puntúa cada palabra) aún no ha sido validada. Valídala antes de usarlos.</div>
+      )}
+      {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
+      {people.length === 0 ? <p className="muted">Todavía nadie ha completado el DISC.</p> : (
+        <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
+          <table className="table">
+            <caption className="sr-only">Perfil DISC por persona</caption>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{scales.map((s) => <th key={s} scope="col">{s}</th>)}<th scope="col">Dominante</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
+            <tbody>
+              {people.map((p) => (
+                <tr key={p.participantId}>
+                  <td>{p.person.document}</td>
+                  <td>{p.person.fullName}</td>
+                  {scales.map((s) => <td key={s}>{p.scores[s] > 0 ? '+' : ''}{p.scores[s]} <span className="muted">(seg. {p.segments[s]})</span></td>)}
+                  <td>{p.pattern ? `${p.dominant[0]} · ${p.pattern.nombre}` : `Empate: ${p.dominant.join(', ')}`}</td>
+                  <td><button className="btn secondary" onClick={async () => { setDlErr(''); try { await downloadFile(`/api/participants/${p.participantId}/disc.pdf${qs()}`, `DISC_${p.person.document}.pdf`); } catch (e) { setDlErr((e as Error).message); } }}>Informe PDF</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 16PF: quién lo completó, hoja de respuestas en PDF y exportación para la corrección en la plataforma del editor. */
+function Pf16View({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
+  const { data, error, loading } = useLoad<{ people: { participantId: string; person: { document: string; fullName: string }; date: string; answered: number }[] }>(`/api/campaigns/${campaignId}/pf16${qs()}`);
+  const [dlErr, setDlErr] = useState('');
+  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (error) return <div className="alert error" role="alert">{error}</div>;
+  const people = data?.people ?? [];
+  return (
+    <>
+      <div className="alert ok" role="status">
+        Calificación pendiente: esta aplicación aplica y registra el 16PF, pero no incluye las claves de corrección ni los baremos del editor (TEA).
+        Descarga la hoja de respuestas de cada persona, o el CSV con todas las respuestas (1 = A, 2 = B, 3 = C, 0 = en blanco) para corregirlas con las plantillas o la plataforma del editor.
+      </div>
+      {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
+      <div className="row-between">
+        <span />
+        <button className="btn" disabled={people.length === 0} onClick={async () => { setDlErr(''); try { await downloadFile(`/api/campaigns/${campaignId}/pf16.csv${qs()}`, 'Respuestas16PF.csv'); } catch (e) { setDlErr((e as Error).message); } }}>Descargar respuestas (CSV)</button>
+      </div>
+      {people.length === 0 ? <p className="muted">Todavía nadie ha completado el 16PF.</p> : (
+        <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
+          <table className="table">
+            <caption className="sr-only">Personas que completaron el 16PF</caption>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Respondidas</th><th scope="col">Fecha</th><th scope="col"><span className="sr-only">Hoja</span></th></tr></thead>
+            <tbody>
+              {people.map((p) => (
+                <tr key={p.participantId}>
+                  <td>{p.person.document}</td>
+                  <td>{p.person.fullName}</td>
+                  <td>{p.answered}</td>
+                  <td>{p.date.split('-').reverse().join('/')}</td>
+                  <td><button className="btn secondary" onClick={async () => { setDlErr(''); try { await downloadFile(`/api/participants/${p.participantId}/pf16.pdf${qs()}`, `16PF_${p.person.document}.pdf`); } catch (e) { setDlErr((e as Error).message); } }}>Hoja PDF</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+const VALANTI_COLS = ['Verdad', 'Rectitud', 'Paz', 'Amor', 'No violencia'] as const;
+interface ValantiPerson {
+  participantId: string;
+  person: { document: string; fullName: string };
+  total: Record<string, number>;
+  standard: Record<string, number>;
+  preferred: string[];
+  normValidated: boolean;
+  normLabel: string;
+}
+
+/** VALANTI: perfil de valores de cada persona que completó la prueba. */
+function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
+  const { data, error, loading } = useLoad<{ people: ValantiPerson[] }>(`/api/campaigns/${campaignId}/valanti${qs()}`);
+  const [dlErr, setDlErr] = useState('');
+  if (loading && !data) return <p role="status">Cargando…</p>;
+  if (error) return <div className="alert error" role="alert">{error}</div>;
+  const people = data?.people ?? [];
+  return (
+    <>
+      {people.some((p) => !p.normValidated) && (
+        <div className="alert error" role="status">Puntajes estándar PROVISIONALES: la norma ({people[0]?.normLabel}) aún no ha sido validada. Los puntajes directos no dependen de ella.</div>
+      )}
+      {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
+      {people.length === 0 ? <p className="muted">Todavía nadie ha completado el VALANTI.</p> : (
+        <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
+          <table className="table">
+            <caption className="sr-only">Perfil VALANTI por persona: puntaje directo (estándar)</caption>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{VALANTI_COLS.map((v) => <th key={v} scope="col">{v}</th>)}<th scope="col">Preferido</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
+            <tbody>
+              {people.map((p) => (
+                <tr key={p.participantId}>
+                  <td>{p.person.document}</td>
+                  <td>{p.person.fullName}</td>
+                  {VALANTI_COLS.map((v) => <td key={v}>{p.total[v]} <span className="muted">({p.standard[v]})</span></td>)}
+                  <td>{p.preferred.join(', ')}</td>
+                  <td><button className="btn secondary" onClick={async () => { setDlErr(''); try { await downloadFile(`/api/participants/${p.participantId}/valanti.pdf${qs()}`, `VALANTI_${p.person.document}.pdf`); } catch (e) { setDlErr((e as Error).message); } }}>Informe PDF</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 function Register({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<RegisterData>(`/api/campaigns/${campaignId}/results${qs()}`);
   const [report, setReport] = useState<string | null>(null);

@@ -61,3 +61,23 @@ Son criterio clínico o profesional; no las tomo yo.
 4. **Texto del consentimiento y del aviso de privacidad:** hoy es el FP-PS-CI v01 literal; cualquier cambio lo aprueba ella (y el asesor legal).
 5. **Plazo de retención** de los expedientes (con el asesor legal).
 6. **Mínimo de personas por grupo** en los reportes a la empresa (hoy 5; configurable por empresa).
+
+## Evaluaciones adicionales (DISC, VALANTI, 16PF)
+
+| # | Decisión | Motivo |
+|---|---|---|
+| 32 | Las pruebas del repo `evaluaciones-psicometricas` se **portan como instrumentos** de esta app; no se fusiona ni se incrusta ese repo | Aquel repo no tiene autenticación, cifrado, consentimiento ni auditoría |
+| 33 | **Catálogo de evaluaciones** (`packages/shared/src/assessments.ts`) y columna `campaigns.assessments`; cada campaña elige qué aplica (por defecto, la batería psicosocial) | Las campañas existentes quedan como estaban; DISC, VALANTI y 16PF figuran «próximamente» hasta incorporar su cuestionario y calificación |
+| 34 | El orden de cuestionarios lo da `instrumentsFor(assessments, forma)` | Sustituye la lista fija de la batería en el flujo del colaborador |
+| 35 | **DISC activado.** Respuesta por grupo = `posición MÁS × 4 + posición MENOS`, guardada en el mismo `questionnaire_answers` (cifrada). Validación en servidor: posiciones distintas, grupos 1 a 28 | Reutiliza el almacenamiento y el autoguardado de la batería |
+| 36 | **Clave de calificación DISC PROVISIONAL** (`DISC_KEY`, `packages/scoring/src/disc.ts`): la posición de la palabra en el grupo (0 a 3) puntúa D, I, S, C, tal como está en el repo de origen. Los resultados e informes se rotulan «provisional» hasta poner `DISC_KEY_VALIDATED = true` | No hay evidencia de que sea la clave oficial: varios grupos tienen 3 palabras de un mismo estilo, lo que una clave por posición no refleja. **La valida la psicóloga** |
+| 37 | Segmentos 1 a 7 y descripción del patrón: tomados del repo de origen (un solo patrón, el de la escala más alta; si hay empate no se asigna patrón) | Pendiente de aprobación de la psicóloga |
+| 38 | Resultados DISC solo para la psicóloga (pestaña «DISC» del análisis, informe PDF individual), con la misma regla de acceso clínico que la batería (el administrador justifica) | El colaborador nunca ve puntajes |
+| 39 | **Anexo de consentimiento DISC (borrador)**: se muestra solo en campañas con DISC; el hash y la versión guardados incluyen el anexo | Finalidad distinta a la batería psicosocial. El texto lo aprueba la psicóloga y el asesor legal (mismo trato que el texto base) |
+| 40 | El expediente PDF de respuestas sigue siendo solo de la batería psicosocial; el DISC tiene su propio informe | La plantilla oficial es de la batería |
+| 41 | **VALANTI activado.** Respuesta por pareja = puntos de la frase A (0 a 3); la B recibe 3 menos. Clave (frase → valor) y textos tomados del repo de origen; 90 puntos repartidos en total | Reutiliza el almacenamiento, validación y autoguardado del DISC |
+| 42 | **Norma VALANTI PROVISIONAL** (`VALANTI_NORM`, `packages/scoring/src/valanti.ts`): media y desviación «nacional 1997» del repo de origen, sin fuente. Las cinco medias suman 91,95 y no 90, así que no parecen corresponder a este formato de 30 parejas. Los puntajes directos no dependen de la norma; los estándar y su interpretación se rotulan provisionales hasta `VALANTI_NORM_VALIDATED = true` | **La valida la psicóloga** |
+| 43 | Informe VALANTI en PDF y pestaña «VALANTI» en el análisis, con el mismo control de acceso clínico que el DISC; anexo de consentimiento (borrador) | Mismo trato que el DISC |
+| 44 | Las respuestas del formato anterior de 28 preguntas (29/09 al 02/10/2026) del repo de origen **no se migran** | Aquellos datos no entran a esta app |
+| 45 | **16PF: solo se aplica y se registra; no se califica.** Respuesta por cuestión = índice de la opción (0 = A, 1 = B, 2 = C), 187 cuestiones del repo de origen. La psicóloga descarga la hoja de respuestas en PDF y un CSV (1 = A, 2 = B, 3 = C, 0 = en blanco) para corregirlas con las plantillas y baremos del editor (TEA) | La usuaria confirmó que puede usar el texto del test, pero no se dispone de las claves de corrección ni de los baremos: el documento del COP aportado es solo la evaluación del 16PF-5 (no los trae) y señala que el 16PF-5 solo se corrige con la plataforma de TEA. No se inventa una calificación
+| 46 | **Edición del 16PF por aclarar.** El texto del repo tiene 187 cuestiones (cuestionario clásico, Forma A); el 16PF-5 que describe el COP tiene 185 ítems y otros rasgos y escalas | Son ediciones distintas: la corrección (y la licencia) depende de cuál se use. La confirma la psicóloga |

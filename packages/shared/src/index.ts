@@ -1,6 +1,11 @@
 import { z } from 'zod';
+import { ASSESSMENTS, ASSESSMENT_IDS } from './assessments';
 
 export * from './instrument';
+export * from './assessments';
+export * from './disc';
+export * from './valanti';
+export * from './pf16';
 export * from './consent';
 export * from './ficha';
 
@@ -111,6 +116,13 @@ export const updateUserSchema = z.object({
 export const createCampaignSchema = z.object({
   companyId: z.string().uuid(),
   name: z.string().trim().min(2).max(200),
+  /** Evaluaciones que se aplican en la campaña. Solo las disponibles; por defecto, la batería psicosocial. */
+  assessments: z
+    .array(z.enum(ASSESSMENT_IDS))
+    .min(1)
+    .max(ASSESSMENT_IDS.length)
+    .refine((a) => a.every((id) => ASSESSMENTS[id].available), 'Evaluación no disponible')
+    .default(['psychosocial']),
 });
 
 export const campaignStatusSchema = z.object({ status: z.enum(['open', 'closed']) });
