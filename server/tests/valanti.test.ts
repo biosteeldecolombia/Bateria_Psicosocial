@@ -68,8 +68,10 @@ describe('VALANTI', () => {
     expect(res.json.people).toHaveLength(1);
     const p = res.json.people[0];
     expect(Object.values(p.total as Record<string, number>).reduce((a, b) => a + b, 0)).toBe(90);
-    expect(p.normValidated).toBe(false);
-    expect(p.preferred.length).toBeGreaterThanOrEqual(1);
+    expect(p.normValidated).toBe(true);
+    expect(p.mostImportant.length).toBeGreaterThanOrEqual(1);
+    expect(p.band.Verdad).toBeTypeOf('string');
+    expect(p.standard.Verdad).toBeCloseTo(50 + (10 * (p.total.Verdad - p.norm.Verdad.mean)) / p.norm.Verdad.sd, 8);
 
     const pdf = await env.app.inject({ method: 'GET', url: `/api/participants/${p.participantId}/valanti.pdf`, headers: { origin: 'http://localhost:3000', cookie: psy.cookie, 'x-csrf-token': psy.csrf } });
     expect(pdf.statusCode).toBe(200);

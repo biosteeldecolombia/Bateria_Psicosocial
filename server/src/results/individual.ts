@@ -1,4 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm';
+import { DISC_DATA_VERSION } from '@sanithelp/shared';
 import type { Db } from '../db/client.js';
 import { consents, participants, questionnaireAnswers } from '../db/schema.js';
 import type { Crypto } from '../security/crypto.js';
@@ -31,7 +32,8 @@ export async function loadIndividual(db: Db, crypto: Crypto, campaignId: string,
   for (const p of parts) {
     const r = byPerson.get(p.id);
     if (!r || noConsent.has(p.id)) continue;
-    const stored = JSON.parse(crypto.decrypt(r.dataEnc)) as { answers: Record<string, number> };
+    const stored = JSON.parse(crypto.decrypt(r.dataEnc)) as { answers: Record<string, number>; v?: number };
+    if (instrument === 'disc' && stored.v !== DISC_DATA_VERSION) continue; // grupos antiguos: no calificable
     out.push({
       participantId: p.id,
       document: crypto.decrypt(p.documentEnc),

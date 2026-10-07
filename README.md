@@ -14,9 +14,9 @@ Cada campaña (empresa + ronda) elige **qué evaluaciones aplica** al crearla. L
 | Evaluación | Qué es | Estado | Qué falta |
 |---|---|---|---|
 | **Batería de riesgo psicosocial** | Intralaboral (forma A o B), extralaboral y estrés. Resultados agregados por empresa | **Lista y verificada** contra el Excel oficial | Informe Word (formato de la psicóloga) |
-| **DISC** | 28 grupos de 4 palabras (MÁS / MENOS). Perfil D, I, S, C | Funciona; **resultado provisional** | Validar la **clave de calificación**: hoy la posición de la palabra en el grupo puntúa D, I, S, C, tomada del repo de origen sin confirmar |
-| **VALANTI** | 30 parejas de frases con 3 puntos que se reparten. Cinco valores | Funciona; **puntaje estándar provisional** | Validar la **norma** (media y desviación «nacional 1997» sin fuente; suman 91,95 y no 90). El puntaje directo no depende de ella |
-| **16PF** | 187 cuestiones A, B, C | **Se aplica y se registra; no se califica** | Claves de corrección y baremos del editor (TEA), y confirmar la edición (el texto es de 187 cuestiones; el 16PF-5 tiene 185 ítems) |
+| **DISC** | 28 grupos de 4 palabras (MÁS / MENOS). Perfil D, I, S, C, segmentos 1 a 7 y patrón de perfil (18 patrones) | **Lista y verificada** contra la hoja oficial de corrección (40 casos de Excel reproducidos) | Confirmar la licencia del material |
+| **VALANTI** | 30 parejas de frases con 3 puntos que se reparten. Cinco valores, puntaje estándar con la norma nacional de 1997 (n = 730) | **Lista y verificada** contra la hoja oficial Valanti.xls (25 casos de Excel reproducidos) | Confirmar la licencia del material |
+| **16PF** | 187 cuestiones A, B, C | **Se aplica y se registra; no se califica** | La **clave ítem → escala** del instrumento (TEA no permite corrección manual) y confirmar la edición: el texto es de 187 cuestiones, el 16PF-5 tiene 185 ítems. Hay baremos del 16PF-5 en decatipos, pero sin la clave no sirven |
 
 ### Guía para la psicóloga
 
@@ -25,19 +25,20 @@ Cada campaña (empresa + ronda) elige **qué evaluaciones aplica** al crearla. L
 3. **El colaborador** entra con la credencial, se identifica (documento, nombres y apellidos), recibe un **código personal** para retomar su avance, autoriza el consentimiento (con un anexo por cada prueba individual), llena la ficha de datos generales y responde las evaluaciones. El avance se guarda solo.
 4. **Resultados** (botón de la campaña): pestañas por evaluación.
    - *Batería:* participantes, resumen total, por grupo, dominios y dimensiones, registro individual.
-   - *DISC:* puntajes D, I, S, C, segmento, patrón de la escala dominante e **informe PDF** por persona.
-   - *VALANTI:* puntaje directo y estándar por valor, valor preferido e **informe PDF** por persona.
+   - *DISC:* puntajes D, I, S, C con su segmento, patrón de perfil con su descripción e **informe PDF** por persona (el informe también se despliega en pantalla con «Ver informe»).
+   - *VALANTI:* puntaje directo y estándar por valor (norma nacional 1997), banda, valor más y menos importante, interpretación e **informe PDF** por persona (también desplegable con «Ver informe»).
    - *16PF:* quién lo completó, **hoja de respuestas en PDF** por persona y **CSV** con todas las respuestas (1 = A, 2 = B, 3 = C, 0 = en blanco) para corregir con las plantillas o la plataforma del editor.
 5. **Expediente PDF** (pestaña Participantes): consentimiento firmado electrónicamente (con sus anexos), ficha y las respuestas de la Batería. Las respuestas de DISC, VALANTI y 16PF van en sus propios informes, no en el expediente.
 
 ### Lo que debe aprobar la psicóloga (o el asesor legal) antes de usar en producción
 
 - **Anexos del consentimiento** de DISC, VALANTI y 16PF: son **borradores** (`CONSENT_ADDENDA` en [assessments.ts](packages/shared/src/assessments.ts)).
-- **Clave del DISC** (`DISC_KEY`), **norma del VALANTI** (`VALANTI_NORM`) y **textos de interpretación** de ambas. Al validarlos se ponen `DISC_KEY_VALIDATED` y `VALANTI_NORM_VALIDATED` en `true` y desaparece el rótulo «provisional».
-- **Edición, licencia y corrección del 16PF.**
+- **Licencias:** la hoja del VALANTI está marcada «© Octavio Escobar, copia para uso exclusivo de Listos S.A.», el formulario es © PSINERGIA y el manual lo distribuye psicologiacientifica.com. Conviene tener la autorización por escrito de los titulares del DISC, del VALANTI y del 16PF (TEA).
+- **Textos de interpretación** del DISC y del VALANTI: son los de las hojas oficiales; ella decide si los usa tal cual en el informe.
+- **Edición y clave del 16PF** (ver la tabla).
 - Las decisiones de siempre: criterio de «Relación con los colaboradores» para quien no es jefe, protocolo ante resultados altos, formato de informes, plazo de retención.
 
-Todo lo decidido está en [docs/DECISIONES.md](docs/DECISIONES.md) (decisiones 32 a 46 para las evaluaciones).
+Todo lo decidido está en [docs/DECISIONES.md](docs/DECISIONES.md) (decisiones 32 a 53 para las evaluaciones).
 
 ### Agregar otra evaluación
 

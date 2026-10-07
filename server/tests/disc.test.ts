@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
+import { createCrypto } from '../src/security/crypto.js';
 import { CARGO_OPTIONS, DISC_GROUPS, encodeDisc } from '@sanithelp/shared';
+import { scoreDisc } from '@sanithelp/scoring';
 import { ADMIN_EMAIL, ADMIN_PW, loginStaffReady, newClient, seedAdmin, startEnv, type Client, type TestEnv } from './helpers.js';
 
 let env: TestEnv;
@@ -79,9 +81,13 @@ describe('DISC', () => {
     expect(res.status).toBe(200);
     expect(res.json.people).toHaveLength(1);
     const p = res.json.people[0];
-    expect(p.scores).toEqual({ D: 28, I: 0, S: 0, C: -28 });
-    expect(p.dominant).toEqual(['D']);
-    expect(p.keyValidated).toBe(false);
+    // MÁS en la posición 0 y MENOS en la 3 de todos los grupos, calificado con la clave oficial
+    const expected = scoreDisc(Object.fromEntries(Array.from({ length: DISC_GROUPS.length }, (_, i) => [i + 1, encodeDisc(0, 3)])));
+    expect(p.scores).toEqual(expected.scores);
+    expect(p.segments).toEqual(expected.segments);
+    expect(p.code).toBe(expected.code);
+    expect(p.pattern.nombre).toBe(expected.pattern.nombre);
+    expect(p.keyValidated).toBe(true);
 
     const pdf = await env.app.inject({ method: 'GET', url: `/api/participants/${p.participantId}/disc.pdf`, headers: { origin: 'http://localhost:3000', cookie: psy.cookie, 'x-csrf-token': psy.csrf } });
     expect(pdf.statusCode).toBe(200);
@@ -169,4 +175,26 @@ describe('DISC', () => {
     const exp = await env.app.inject({ method: 'GET', url: `/api/participants/${people[0].participantId}/expediente.pdf${q}`, headers: { origin: 'http://localhost:3000', cookie: admin.cookie, 'x-csrf-token': admin.csrf } });
     expect(exp.statusCode).toBe(409);
   });
+
+  it('las respuestas DISC guardadas con los grupos antiguos (sin versión) no se califican ni se reutilizan', async () => {
+    const { campaignId, cl } = await newCampaign(['disc']);
+    await enter(cl, '4000040');
+    const all: Record<string, number> = {};
+    for (let g = 1; g <= DISC_GROUPS.length; g++) all[g] = encodeDisc(0, 1);
+    await cl.call('PUT', '/api/participation/questionnaires/disc', { answers: all, complete: true });
+    await cl.call('POST', '/api/participation/submit');
+    expect((await psy.call('GET', `/api/campaigns/${campaignId}/disc`)).json.people).toHaveLength(1);
+    // simula un registro viejo: se quita la versión del contenido cifrado
+    const crypto = createCrypto(env.cfg);
+    const row = (await env.pool.query("SELECT participant_id, data_enc FROM questionnaire_answers WHERE instrument = 'disc' AND participant_id IN (SELECT id FROM participants WHERE campaign_id = $1)", [campaignId])).rows[0];
+    const data = JSON.parse(crypto.decrypt(row.data_enc));
+    delete data.v;
+    await env.pool.query('UPDATE questionnaire_answers SET data_enc = $1 WHERE participant_id = $2 AND instrument = $3', [crypto.encrypt(JSON.stringify(data)), row.participant_id, 'disc']);
+    expect((await psy.call('GET', `/api/campaigns/${campaignId}/disc`)).json.people).toHaveLength(0);
+    const st = await cl.call('GET', '/api/participation/state');
+    const q = st.json.questionnaires.find((x: { id: string }) => x.id === 'disc');
+    expect(q.complete).toBe(false);
+    expect(q.answered).toBe(0);
+  });
 });
+

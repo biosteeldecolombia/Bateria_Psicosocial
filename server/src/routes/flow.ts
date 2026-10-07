@@ -6,6 +6,7 @@ import {
   CONSENT_BLOCKS,
   CONSENT_DATE,
   CONSENT_OPTIONS,
+  DISC_DATA_VERSION,
   DISC_GROUPS,
   PF16_ITEMS,
   VALANTI_PAIRS,
@@ -42,6 +43,8 @@ export function consentTextFor(assessments: readonly string[]) {
 interface StoredQ {
   answers: Record<string, number>;
   gates: { clients?: boolean; boss?: boolean };
+  /** Versión del formato (solo el DISC la usa). */
+  v?: number;
 }
 
 const isId = (v: unknown): v is InstrumentId => v === 'disc' || v === 'valanti' || v === 'pf16' || (typeof v === 'string' && v in QUESTIONNAIRES);
@@ -79,7 +82,12 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
   }
   async function qOf(pid: string, id: InstrumentId) {
     const [r] = await db.select().from(questionnaireAnswers).where(and(eq(questionnaireAnswers.participantId, pid), eq(questionnaireAnswers.instrument, id))).limit(1);
-    return r ? { data: JSON.parse(crypto.decrypt(r.dataEnc)) as StoredQ, complete: r.complete } : { data: { answers: {}, gates: {} } as StoredQ, complete: false };
+    const empty = { data: { answers: {}, gates: {} } as StoredQ, complete: false };
+    if (!r) return empty;
+    const data = JSON.parse(crypto.decrypt(r.dataEnc)) as StoredQ;
+    // DISC guardado con los grupos antiguos: no se puede reutilizar, la persona lo responde de nuevo.
+    if (id === 'disc' && data.v !== DISC_DATA_VERSION) return empty;
+    return { data, complete: r.complete };
   }
 
   /** Evaluaciones asignadas a la campaña de la persona, y cuestionarios que le tocan según ellas. */
@@ -293,7 +301,7 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
       const missing = Array.from({ length: count }, (_, i) => i + 1).filter((n) => answers[String(n)] === undefined);
       if (missing.length) return reply.code(400).send({ error: 'Faltan preguntas por responder.', missing });
     }
-    const dataEnc = crypto.encrypt(JSON.stringify({ answers, gates: {} } satisfies StoredQ));
+    const dataEnc = crypto.encrypt(JSON.stringify({ answers, gates: {}, ...(instrument === 'disc' ? { v: DISC_DATA_VERSION } : {}) } satisfies StoredQ));
     await db
       .insert(questionnaireAnswers)
       .values({ participantId: p.id, instrument, dataEnc, complete })

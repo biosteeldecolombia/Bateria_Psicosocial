@@ -1,5 +1,5 @@
-// VALANTI: 30 parejas de frases en las que se reparten 3 puntos. Textos y clave tomados del repositorio
-// «evaluaciones-psicometricas» (src/App.jsx y reportes/generarPDFResultados.js).
+// VALANTI (Ps. Octavio Escobar): 30 parejas de frases en las que se reparten 3 puntos.
+// Textos tomados del formulario oficial (Valanti-4.doc) y clave de las fórmulas de la hoja Valanti.xls (TEST VALANTI.zip, aportada por la usuaria).
 
 export type ValantiValue = 'Verdad' | 'Rectitud' | 'Paz' | 'Amor' | 'No violencia';
 export const VALANTI_VALUES: readonly ValantiValue[] = ['Verdad', 'Rectitud', 'Paz', 'Amor', 'No violencia'];
@@ -44,38 +44,38 @@ export const VALANTI_PART2: readonly (readonly [string, string])[] = [
 export const VALANTI_PAIRS = [...VALANTI_PART1, ...VALANTI_PART2];
 export const VALANTI_PART1_COUNT = VALANTI_PART1.length;
 
-/** Clave: a qué valor suma cada frase de cada pareja (A, B). */
+/** Clave oficial (hoja Valanti.xls del autor): a qué valor suma cada frase de cada pareja (A, B). El repositorio «evaluaciones-psicometricas» tenía 16 de las 30 parejas con la clave equivocada. */
 export const VALANTI_KEY: readonly (readonly [ValantiValue, ValantiValue])[] = [
   ["Amor", "Rectitud"],
-  ["No violencia", "Rectitud"],
-  ["Paz", "Amor"],
+  ["Amor", "Rectitud"],
+  ["Verdad", "Paz"],
   ["Paz", "No violencia"],
   ["Verdad", "Rectitud"],
   ["Verdad", "Rectitud"],
   ["Rectitud", "Verdad"],
   ["Amor", "Verdad"],
-  ["Paz", "Verdad"],
-  ["Rectitud", "Paz"],
-  ["Rectitud", "No violencia"],
-  ["Verdad", "No violencia"],
-  ["No violencia", "Rectitud"],
-  ["Rectitud", "No violencia"],
-  ["No violencia", "No violencia"],
-  ["Verdad", "Amor"],
-  ["Rectitud", "No violencia"],
+  ["No violencia", "Verdad"],
   ["No violencia", "Paz"],
   ["Rectitud", "No violencia"],
-  ["Verdad", "Rectitud"],
-  ["Rectitud", "Paz"],
+  ["Verdad", "Paz"],
   ["No violencia", "Rectitud"],
-  ["No violencia", "No violencia"],
+  ["Paz", "No violencia"],
+  ["Amor", "Paz"],
+  ["Verdad", "Amor"],
+  ["Amor", "Paz"],
+  ["No violencia", "Verdad"],
+  ["Paz", "Amor"],
+  ["Verdad", "No violencia"],
+  ["Rectitud", "Paz"],
+  ["No violencia", "Amor"],
+  ["No violencia", "Verdad"],
   ["Paz", "Rectitud"],
   ["Paz", "Verdad"],
   ["Rectitud", "Paz"],
-  ["No violencia", "Rectitud"],
+  ["No violencia", "Amor"],
   ["Rectitud", "Paz"],
-  ["Amor", "Amor"],
-  ["No violencia", "No violencia"]
+  ["Rectitud", "No violencia"],
+  ["No violencia", "Amor"],
 ];
 
 export const VALANTI_INSTRUCTIONS = {

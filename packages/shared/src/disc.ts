@@ -1,5 +1,12 @@
 // DISC: 28 grupos de 4 palabras; en cada uno la persona marca la que MÁS y la que MENOS la representa.
-// Palabras tomadas del repositorio «evaluaciones-psicometricas» (reportes/discPreguntas.js).
+// Grupos y palabras tomados de la hoja oficial «DISC_HOJA_DE_PRUEBA_Y_CORRECCION.xlsm» (cada grupo es una columna de la hoja de prueba).
+// OJO: el repositorio «evaluaciones-psicometricas» armaba los grupos leyendo las filas de esa hoja, no las columnas; esos grupos eran incorrectos.
+
+/**
+ * Versión del formato de respuestas del DISC. La 2 usa los grupos oficiales de la hoja de corrección; las respuestas guardadas
+ * sin versión (grupos mal armados del repositorio de origen) no se pueden calificar y se descartan.
+ */
+export const DISC_DATA_VERSION = 2;
 
 export type DiscScale = 'D' | 'I' | 'S' | 'C';
 export const DISC_SCALES: readonly DiscScale[] = ['D', 'I', 'S', 'C'];
@@ -12,34 +19,34 @@ export const DISC_INSTRUCTIONS = [
 ];
 
 export const DISC_GROUPS: readonly (readonly [string, string, string, string])[] = [
-  ["Entusiasta", "Extrovertido(a)", "Popular", "Impulsivo(a)"],
-  ["Rápido(a)", "Precavido(a)", "Reflexivo(a)", "Cuida los Detalles"],
-  ["Lógico(a)", "Constante", "Tenaz", "Enérgico(a)"],
-  ["Apacible", "Impaciente", "Calmado(a)", "Tranquilo(a)"],
-  ["Cauteloso(a)", "Discreto(a)", "Analítico(a)", "Sociable"],
-  ["Decidido(a)", "Complaciente", "Audaz", "Sistemático(a)"],
-  ["Receptivo(a)", "Encantador(a)", "Leal", "Vigoroso(a)"],
-  ["Bondadoso(a)", "Insistente", "Promotor(a)", "Tolerante"],
-  ["Amigable", "Valeroso(a)", "Sociable", "Cautivador(a)"],
-  ["Preciso(a)", "Anima a los demás", "Paciente", "Contento(a)"],
-  ["Franco(a)", "Pacífico(a)", "Autosuficiente", "Exigente"],
-  ["Tranquilo(a)", "Perfeccionista", "Certero(a)", "Apegado(a) a las normas"],
-  ["Elocuente", "Reservado(a)", "Adaptable", "Le agrada discutir"],
-  ["Controlado(a)", "Atento(a)", "Resuelto(a)", "Metódico(a)"],
-  ["Tolerante", "Osado(a)", "Prevenido(a)", "Comedido(a)"],
-  ["Decisivo(a)", "Alegre", "Vivaz", "Desenvuelto(a)"],
-  ["Atrevido(a)", "Estimulante", "Agresivo(a)", "Jovial"],
-  ["Concienzudo(a)", "Gentil", "Impetuoso(a)", "Preciso(a)"],
-  ["Comunicativo(a)", "Perceptivo(a)", "Amistoso(a)", "Directo(a)"],
-  ["Moderado(a)", "Independiente", "Discerniente", "Ecuánime"],
-  ["Ameno(a)", "Competitivo(a)", "De trato Fácil", "Inquieto(a)"],
-  ["Ingenioso(a)", "Considerado(a)", "Compasivo(a)", "Amable"],
-  ["Investigador(a)", "Alegre", "Cauto(a)", "Elocuente"],
-  ["Acepta Riesgos", "Sagaz", "Habla Directo", "Cuidadoso(a)"],
-  ["Expresivo(a)", "Meticuloso(a)", "Evaluador(a)", "Prudente"],
-  ["Cuidadoso(a)", "Obediente", "Generoso(a)", "Pionero(a)"],
-  ["Dominante", "Ideas Firmes", "Animado(a)", "Espontáneo(a)"],
-  ["Sensible", "Alentador(a)", "Persistente", "Colaborador"]
+  ["Entusiasta", "Rápido(a)", "Lógico(a)", "Apacible"],
+  ["Cauteloso(a)", "Decidido(a)", "Receptivo(a)", "Bondadoso(a)"],
+  ["Amigable", "Preciso(a)", "Franco(a)", "Tranquilo(a)"],
+  ["Elocuente", "Controlado(a)", "Tolerante", "Decisivo(a)"],
+  ["Atrevido(a)", "Concienzudo(a)", "Comunicativo(a)", "Moderado(a)"],
+  ["Ameno(a)", "Ingenioso(a)", "Investigador(a)", "Acepta Riesgos"],
+  ["Expresivo(a)", "Cuidadoso(a)", "Dominante", "Sensible"],
+  ["Extrovertido(a)", "Precavido(a)", "Constante", "Impaciente"],
+  ["Discreto(a)", "Complaciente", "Encantador(a)", "Insistente"],
+  ["Valeroso(a)", "Anima a los demás", "Pacífico(a)", "Perfeccionista"],
+  ["Reservado(a)", "Atento(a)", "Osado(a)", "Alegre"],
+  ["Estimulante", "Gentil", "Perceptivo(a)", "Independiente"],
+  ["Competitivo(a)", "Considerado(a)", "Alegre", "Sagaz"],
+  ["Meticuloso(a)", "Obediente", "Ideas Firmes", "Alentador(a)"],
+  ["Popular", "Reflexivo(a)", "Tenaz", "Calmado(a)"],
+  ["Analítico(a)", "Audaz", "Leal", "Promotor(a)"],
+  ["Sociable", "Paciente", "Autosuficiente", "Certero(a)"],
+  ["Adaptable", "Resuelto(a)", "Prevenido(a)", "Vivaz"],
+  ["Agresivo(a)", "Impetuoso(a)", "Amistoso(a)", "Discerniente"],
+  ["De trato Fácil", "Compasivo(a)", "Cauto(a)", "Habla Directo"],
+  ["Evaluador(a)", "Generoso(a)", "Animado(a)", "Persistente"],
+  ["Impulsivo(a)", "Cuida los Detalles", "Enérgico(a)", "Tranquilo(a)"],
+  ["Sociable", "Sistemático(a)", "Vigoroso(a)", "Tolerante"],
+  ["Cautivador(a)", "Contento(a)", "Exigente", "Apegado(a) a las normas"],
+  ["Le agrada discutir", "Metódico(a)", "Comedido(a)", "Desenvuelto(a)"],
+  ["Jovial", "Preciso(a)", "Directo(a)", "Ecuánime"],
+  ["Inquieto(a)", "Amable", "Elocuente", "Cuidadoso(a)"],
+  ["Prudente", "Pionero(a)", "Espontáneo(a)", "Colaborador"],
 ];
 
 /**

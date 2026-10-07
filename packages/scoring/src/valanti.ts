@@ -1,46 +1,58 @@
 import { VALANTI_KEY, VALANTI_PAIRS, VALANTI_PART1_COUNT, VALANTI_VALUES, isValidValantiAnswer, type ValantiValue } from '@sanithelp/shared';
+import { VALANTI_AREAS, VALANTI_BANDS, VALANTI_BAND_TEXTS, VALANTI_NORM_DATA } from './valanti_data';
 
 /**
- * Calificación del VALANTI.
+ * Calificación del VALANTI según la hoja oficial «Valanti.xls» y el manual v2.01 (Ps. Octavio Escobar).
  *
- * Cada pareja reparte 3 puntos entre dos frases; cada frase suma al valor que indica VALANTI_KEY. El puntaje directo
- * de cada valor es la suma de las 30 parejas (en total se reparten 90 puntos). Se reportan por separado la parte 1
- * (importancia personal) y la parte 2 (frases inaceptables).
+ *  1. Cada pareja reparte 3 puntos; cada frase suma al valor que indica VALANTI_KEY. El puntaje directo de cada valor
+ *     es la suma de las 30 parejas (en total, 90 puntos).
+ *  2. Puntaje estándar = 50 + 10 × (directo − media) / desviación, con la norma nacional de 1997 (n = 730), sin redondear.
+ *  3. La banda (Muy bajo … Muy alto), las estrellas y el texto salen del puntaje estándar sin redondear.
+ *  4. «Distancia con la organización» = estándar − 50.
+ *  5. Valor más / menos importante = el de mayor / menor puntaje estándar.
  *
- * ATENCIÓN — NORMA PROVISIONAL: la media y la desviación («Norma nacional 1997») se tomaron del repositorio
- * «evaluaciones-psicometricas», sin fuente. Las cinco medias suman 91,95 y no 90 (los puntos que se reparten), así que
- * no parecen provenir de este mismo formato de 30 parejas. Hasta que la psicóloga confirme la norma, los puntajes
- * estándar se rotulan como provisionales. Para cambiarla, edita VALANTI_NORM y pon VALANTI_NORM_VALIDATED en true.
+ * La hoja original incluye un candado de licencia que distorsiona el puntaje de Rectitud si cambia el nombre de quien
+ * tiene la licencia; aquí no se replica (equivale a la hoja con el nombre autorizado).
  */
-export const VALANTI_NORM: Record<ValantiValue, { mean: number; sd: number }> = {
-  Verdad: { mean: 15.65, sd: 4.7 },
-  Rectitud: { mean: 21.05, sd: 4.44 },
-  Paz: { mean: 17.35, sd: 6.61 },
-  Amor: { mean: 16.68, sd: 5.41 },
-  'No violencia': { mean: 21.22, sd: 7.19 },
-};
-export const VALANTI_NORM_LABEL = 'Norma nacional 1997, según el repositorio de origen y sin fuente verificada';
-export const VALANTI_NORM_VALIDATED = false;
+export const VALANTI_NORM = VALANTI_NORM_DATA as Record<ValantiValue, { mean: number; sd: number }>;
+export const VALANTI_NORM_LABEL = 'Norma nacional 1997 (n = 730), manual VALANTI v2.01 de O. Escobar';
+export const VALANTI_NORM_VALIDATED = true;
+export const VALANTI_NORM_SOURCE = 'Hoja Valanti.xls y manual aportados por la usuaria (TEST VALANTI.zip)';
 
 export interface ValantiResult {
   /** Puntaje directo por valor (suma de las dos partes). */
   total: Record<ValantiValue, number>;
   part1: Record<ValantiValue, number>;
   part2: Record<ValantiValue, number>;
-  /** Puntaje estándar: 50 + 10 × (directo − media) / desviación, redondeado. */
+  /** Puntaje estándar sin redondear (para mostrar, redondear). */
   standard: Record<ValantiValue, number>;
-  /** Distancia con la norma: directo − media, redondeada. */
+  /** Distancia con la organización (norma): estándar − 50. */
   distance: Record<ValantiValue, number>;
-  /** Interpretación del puntaje estándar: ≥ 60 alto, 50 a 59 medio, < 50 bajo. */
-  band: Record<ValantiValue, 'alto' | 'medio' | 'bajo'>;
-  /** Valor(es) de mayor puntaje directo; si hay empate, todos los empatados. */
-  preferred: ValantiValue[];
+  /** Banda del puntaje estándar: Muy bajo, Bajo, Promedio Bajo, Promedio, Promedio Alto, Alto o Muy alto. */
+  band: Record<ValantiValue, string>;
+  /** Estrellas de la banda (de * a *******). */
+  stars: Record<ValantiValue, string>;
+  /** Interpretación de la banda de cada valor (texto de la hoja oficial). */
+  interpretation: Record<ValantiValue, string>;
+  /** Valor(es) de mayor puntaje estándar y su área; si hay empate, todos los empatados. */
+  mostImportant: { value: ValantiValue; area: string }[];
+  /** Valor(es) de menor puntaje estándar y su área. */
+  leastImportant: { value: ValantiValue; area: string }[];
   pairsAnswered: number;
   complete: boolean;
   normValidated: boolean;
 }
 
 const zero = (): Record<ValantiValue, number> => ({ Verdad: 0, Rectitud: 0, Paz: 0, Amor: 0, 'No violencia': 0 });
+
+/** Índice de la banda de un puntaje estándar (sin redondear). */
+export const valantiBandIndex = (standard: number): number => {
+  let idx = 0;
+  VALANTI_BANDS.forEach((b, i) => {
+    if (standard >= b.desde) idx = i;
+  });
+  return idx;
+};
 
 /** `answers`: pareja (1 a 30) → puntos de la frase A (0 a 3); la B recibe 3 menos. */
 export function scoreValanti(answers: Record<number | string, number>): ValantiResult {
@@ -60,14 +72,21 @@ export function scoreValanti(answers: Record<number | string, number>): ValantiR
   const standard = zero();
   const distance = zero();
   const band = {} as ValantiResult['band'];
+  const stars = {} as ValantiResult['stars'];
+  const interpretation = {} as ValantiResult['interpretation'];
   for (const v of VALANTI_VALUES) {
     total[v] = part1[v] + part2[v];
     const { mean, sd } = VALANTI_NORM[v];
-    standard[v] = Math.round(50 + ((total[v] - mean) / sd) * 10);
-    distance[v] = Math.round(total[v] - mean);
-    band[v] = standard[v] >= 60 ? 'alto' : standard[v] >= 50 ? 'medio' : 'bajo';
+    standard[v] = 50 + (10 * (total[v] - mean)) / sd;
+    distance[v] = standard[v] - 50;
+    const bi = valantiBandIndex(standard[v]);
+    band[v] = VALANTI_BANDS[bi]!.nombre;
+    stars[v] = VALANTI_BANDS[bi]!.estrellas;
+    interpretation[v] = VALANTI_BAND_TEXTS[v]![bi]!;
   }
-  const max = Math.max(...VALANTI_VALUES.map((v) => total[v]));
+  const max = Math.max(...VALANTI_VALUES.map((v) => standard[v]));
+  const min = Math.min(...VALANTI_VALUES.map((v) => standard[v]));
+  const pick = (target: number) => VALANTI_VALUES.filter((v) => standard[v] === target).map((value) => ({ value, area: VALANTI_AREAS[value]! }));
   return {
     total,
     part1,
@@ -75,18 +94,12 @@ export function scoreValanti(answers: Record<number | string, number>): ValantiR
     standard,
     distance,
     band,
-    preferred: VALANTI_VALUES.filter((v) => total[v] === max),
+    stars,
+    interpretation,
+    mostImportant: pick(max),
+    leastImportant: pick(min),
     pairsAnswered: answered,
     complete: answered === VALANTI_PAIRS.length,
     normValidated: VALANTI_NORM_VALIDATED,
   };
 }
-
-/** Descripción de cada valor (texto del repositorio de origen; pendiente de aprobación de la psicóloga). */
-export const VALANTI_DESCRIPTIONS: Record<ValantiValue, string> = {
-  Verdad: 'La verdad se relaciona con la claridad del pensamiento, la honestidad, la concentración, la curiosidad y la capacidad de analizar con criterio.',
-  Rectitud: 'La rectitud representa la integridad, la ética, la responsabilidad, la perseverancia, el respeto y el cumplimiento de los compromisos.',
-  Paz: 'La paz se manifiesta en la calma, la estabilidad emocional, la reflexión, la paciencia, la serenidad y la capacidad de mantener el equilibrio.',
-  Amor: 'El amor expresa empatía, afecto, cooperación, gratitud, solidaridad y una disposición genuina para cuidar a las demás personas.',
-  'No violencia': 'La no violencia implica tolerancia, respeto, perdón, compasión, convivencia y rechazo de la agresión, el odio y la discriminación.',
-};

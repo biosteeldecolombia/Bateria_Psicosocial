@@ -376,14 +376,18 @@ interface RegisterData {
   participantIds: string[];
 }
 type Scale = 'D' | 'I' | 'S' | 'C';
+interface DiscPattern {
+  nombre: string;
+  descripcion: (Record<string, string> & { observaciones: string[] }) | null;
+}
 interface DiscPerson {
   participantId: string;
   person: { document: string; fullName: string };
   date: string;
   scores: Record<Scale, number>;
   segments: Record<Scale, number>;
-  dominant: string[];
-  pattern: ({ nombre: string } & Record<string, string>) | null;
+  code: string;
+  pattern: DiscPattern;
   keyValidated: boolean;
 }
 
@@ -410,14 +414,14 @@ function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
   return (
     <>
       {people.some((p) => !p.keyValidated) && (
-        <div className="alert error" role="status">Resultados PROVISIONALES: la clave de calificación del DISC (qué escala puntúa cada palabra) aún no ha sido validada. Valídala antes de usarlos.</div>
+        <div className="alert error" role="status">Resultados PROVISIONALES: la clave de calificación del DISC aún no ha sido validada.</div>
       )}
       {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
       {people.length === 0 ? <p className="muted">Todavía nadie ha completado el DISC.</p> : (
         <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
           <table className="table">
-            <caption className="sr-only">Perfil DISC por persona</caption>
-            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{scales.map((s) => <th key={s} scope="col">{s}</th>)}<th scope="col">Dominante</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
+            <caption className="sr-only">Perfil DISC por persona: puntaje (segmento)</caption>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{scales.map((s) => <th key={s} scope="col">{s}</th>)}<th scope="col">Patrón de perfil</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
             <tbody>
               {people.map((p) => (
                 <ReportRow
@@ -427,22 +431,28 @@ function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
                     <td>{p.person.document}</td>
                     <td>{p.person.fullName}</td>
                     {scales.map((s) => <td key={s}>{signed(p.scores[s])} <span className="muted">(seg. {p.segments[s]})</span></td>)}
-                    <td>{p.pattern ? `${p.dominant[0]} · ${p.pattern.nombre}` : `Empate: ${p.dominant.join(', ')}`}</td>
+                    <td>{p.pattern.nombre}</td>
                   </>}
                   actions={<PdfButton url={`/api/participants/${p.participantId}/disc.pdf${qs()}`} name={`DISC_${p.person.document}.pdf`} label="Informe PDF" onError={setDlErr} />}
                 >
                   <h3>Informe DISC · {p.person.fullName}</h3>
-                  <p className="muted">Aplicado el {fmtDate(p.date)}. Puntaje relativo: +1 por cada MÁS y −1 por cada MENOS (de −28 a +28).{!p.keyValidated && ' Resultado provisional.'}</p>
+                  <p className="muted">Aplicado el {fmtDate(p.date)}. Puntaje de cada escala = palabras MÁS − palabras MENOS que puntúan en ella (de −28 a +28). Código de segmentos D-I-S-C: <strong>{p.code}</strong>.{!p.keyValidated && ' Resultado provisional.'}</p>
                   {scales.map((s) => <ScoreBar key={s} label={`${s} · ${DISC_NAMES[s]}`} value={p.scores[s]} min={-28} max={28} text={`${signed(p.scores[s])} (segmento ${p.segments[s]})`} />)}
-                  {p.pattern ? (
+                  <h4>Patrón de perfil: {p.pattern.nombre}</h4>
+                  {p.pattern.descripcion ? (
                     <>
-                      <h4>Escala dominante: {p.dominant[0]} · Patrón «{p.pattern.nombre}»</h4>
                       <dl className="report-dl">
-                        {DISC_PATTERN_LABELS.map(([k, label]) => <div key={k}><dt>{label}</dt><dd>{p.pattern![k]}</dd></div>)}
+                        {DISC_PATTERN_LABELS.map(([k, label]) => <div key={k}><dt>{label}</dt><dd>{p.pattern.descripcion![k]}</dd></div>)}
                       </dl>
+                      {p.pattern.descripcion.observaciones.length > 0 && (
+                        <>
+                          <h4>Observaciones</h4>
+                          {p.pattern.descripcion.observaciones.map((o, i) => <p key={i}>{o}</p>)}
+                        </>
+                      )}
                     </>
                   ) : (
-                    <p><strong>Empate en la escala más alta ({p.dominant.join(', ')}).</strong> Se interpreta el perfil completo; no se asigna un solo patrón.</p>
+                    <p className="muted">La hoja oficial de corrección no incluye una descripción para este patrón. Se interpreta con los puntajes y segmentos de cada escala.</p>
                   )}
                 </ReportRow>
               ))}
@@ -516,9 +526,11 @@ interface ValantiPerson {
   standard: Record<string, number>;
   distance: Record<string, number>;
   band: Record<string, string>;
-  preferred: string[];
+  stars: Record<string, string>;
+  interpretation: Record<string, string>;
+  mostImportant: { value: string; area: string }[];
+  leastImportant: { value: string; area: string }[];
   norm: Record<string, { mean: number; sd: number }>;
-  descriptions: Record<string, string>;
   normValidated: boolean;
   normLabel: string;
 }
@@ -530,17 +542,18 @@ function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) 
   if (loading && !data) return <p role="status">Cargando…</p>;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const people = data?.people ?? [];
+  const names = (l: { value: string; area: string }[]) => l.map((m) => `${m.value.toUpperCase()} (área ${m.area})`).join(' y ');
   return (
     <>
       {people.some((p) => !p.normValidated) && (
-        <div className="alert error" role="status">Puntajes estándar PROVISIONALES: la norma ({people[0]?.normLabel}) aún no ha sido validada. Los puntajes directos no dependen de ella.</div>
+        <div className="alert error" role="status">Puntajes estándar PROVISIONALES: la norma ({people[0]?.normLabel}) aún no ha sido validada.</div>
       )}
       {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
       {people.length === 0 ? <p className="muted">Todavía nadie ha completado el VALANTI.</p> : (
         <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
           <table className="table">
             <caption className="sr-only">Perfil VALANTI por persona: puntaje directo (estándar)</caption>
-            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{VALANTI_COLS.map((v) => <th key={v} scope="col">{v}</th>)}<th scope="col">Preferido</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th>{VALANTI_COLS.map((v) => <th key={v} scope="col">{v}</th>)}<th scope="col">Más importante</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
             <tbody>
               {people.map((p) => (
                 <ReportRow
@@ -549,30 +562,30 @@ function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) 
                   cells={<>
                     <td>{p.person.document}</td>
                     <td>{p.person.fullName}</td>
-                    {VALANTI_COLS.map((v) => <td key={v}>{p.total[v]} <span className="muted">({p.standard[v]})</span></td>)}
-                    <td>{p.preferred.join(', ')}</td>
+                    {VALANTI_COLS.map((v) => <td key={v}>{p.total[v]} <span className="muted">({Math.round(p.standard[v]!)})</span></td>)}
+                    <td>{p.mostImportant.map((m) => m.value).join(', ')}</td>
                   </>}
                   actions={<PdfButton url={`/api/participants/${p.participantId}/valanti.pdf${qs()}`} name={`VALANTI_${p.person.document}.pdf`} label="Informe PDF" onError={setDlErr} />}
                 >
                   <h3>Informe VALANTI · {p.person.fullName}</h3>
-                  <p className="muted">Aplicado el {fmtDate(p.date)}. {!p.normValidated && 'Puntaje estándar provisional. '}Valor preferido (mayor puntaje directo): <strong>{p.preferred.join(', ')}</strong>{p.preferred.length > 1 ? ' (empate)' : ''}.</p>
+                  <p className="muted">Aplicado el {fmtDate(p.date)}. {!p.normValidated && 'Puntaje estándar provisional. '}<strong>Valor más importante:</strong> {names(p.mostImportant)}. <strong>Valor menos importante:</strong> {names(p.leastImportant)}.</p>
                   <div className="scroll" tabIndex={0} role="region" aria-label="Detalle del puntaje (desplázala con las flechas del teclado)">
                     <table className="table">
-                      <thead><tr><th scope="col">Valor</th><th scope="col">Parte 1</th><th scope="col">Parte 2</th><th scope="col">Directo</th><th scope="col">Media</th><th scope="col">Desv.</th><th scope="col">Estándar</th><th scope="col">Interpretación</th><th scope="col">Distancia</th></tr></thead>
+                      <thead><tr><th scope="col">Valor</th><th scope="col">Parte 1</th><th scope="col">Parte 2</th><th scope="col">Directo</th><th scope="col">Media</th><th scope="col">Desv.</th><th scope="col">Estándar</th><th scope="col">Banda</th><th scope="col">Distancia</th></tr></thead>
                       <tbody>
                         {VALANTI_COLS.map((v) => (
                           <tr key={v}>
                             <th scope="row">{v}</th><td>{p.part1[v]}</td><td>{p.part2[v]}</td><td><strong>{p.total[v]}</strong></td>
-                            <td>{p.norm[v]!.mean}</td><td>{p.norm[v]!.sd}</td><td><strong>{p.standard[v]}</strong></td><td>{p.band[v]}</td><td>{signed(p.distance[v]!)}</td>
+                            <td>{p.norm[v]!.mean.toFixed(2)}</td><td>{p.norm[v]!.sd.toFixed(2)}</td><td><strong>{Math.round(p.standard[v]!)}</strong></td><td>{p.band[v]} <span className="muted">{p.stars[v]}</span></td><td>{signed(Math.round(p.distance[v]!))}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                  {VALANTI_COLS.map((v) => <ScoreBar key={v} label={v} value={p.standard[v]!} min={20} max={80} text={`${p.standard[v]} (50 = media de la norma)`} />)}
+                  {VALANTI_COLS.map((v) => <ScoreBar key={v} label={v} value={p.standard[v]!} min={20} max={80} text={`${Math.round(p.standard[v]!)} (50 = promedio de la norma)`} />)}
                   <h4>Interpretación de los valores</h4>
                   <dl className="report-dl">
-                    {VALANTI_COLS.map((v) => <div key={v}><dt>{v} ({p.total[v]})</dt><dd>{p.descriptions[v]}</dd></div>)}
+                    {VALANTI_COLS.map((v) => <div key={v}><dt>{v} ({p.total[v]}, {p.band[v]})</dt><dd>{p.interpretation[v]}</dd></div>)}
                   </dl>
                 </ReportRow>
               ))}
@@ -583,7 +596,6 @@ function ValantiView({ campaignId, qs }: { campaignId: string; qs: (e?: string) 
     </>
   );
 }
-
 
 function Register({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<RegisterData>(`/api/campaigns/${campaignId}/results${qs()}`);
