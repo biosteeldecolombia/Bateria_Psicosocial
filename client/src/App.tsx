@@ -8,7 +8,7 @@ import { Management } from './Management';
 import { Participation } from './Participation';
 import { CompanyHome } from './analysis/CompanyHome';
 import { Icon } from './icons';
-import { Backdrop, PRODUCT_NAME, Splash } from './BrandLoader';
+import { Backdrop, LogoFull, PRODUCT_NAME, Splash } from './BrandLoader';
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Administrador', psychologist: 'Psicóloga', collaborator: 'Colaborador', company: 'Empresa cliente' };
 
@@ -66,26 +66,40 @@ function Login({ onMe }: { onMe: (m: MeResponse) => void }) {
   return (
     <div className="auth-stage">
       <Backdrop />
-      <section className="login-card" aria-labelledby="t">
-        <span className="hero-mark" aria-hidden="true">
-          <span className="hero-wave" />
-          <span className="hero-wave hero-wave-2" />
-          <img src="/brand/logo_sanithelp_icono.webp" alt="" width="96" height="96" />
-        </span>
-        <h1 id="t"><span className="eyebrow">Sanithelp</span> Evaluaciones Psicométricas</h1>
-        <p className="muted lead">Ingresa con el usuario y la contraseña que te entregó Sanithelp. Si vas a responder las evaluaciones, es la credencial de tu empresa; después te identificarás con tu documento.</p>
-        <form onSubmit={submit} noValidate aria-busy={busy}>
-          <ErrorBox msg={error} />
-          <label htmlFor="u">Usuario</label>
-          <input id="u" type="text" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-          <label htmlFor="p">Contraseña</label>
-          <input id="p" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          <button className="btn block" disabled={busy || !username || !password}>
-            {busy && <span className="spinner" aria-hidden="true" />}
-            {busy ? 'Ingresando…' : 'Ingresar'}
-          </button>
-        </form>
-      </section>
+      <div className="login-split">
+        <section className="login-form-side" aria-labelledby="login-t">
+          <LogoFull />
+          <h2 id="login-t">Ingresar</h2>
+          <p className="sub">Con el usuario y la contraseña que te entregó Sanithelp</p>
+          <form onSubmit={submit} noValidate aria-busy={busy}>
+            <ErrorBox msg={error} />
+            <label htmlFor="u">Usuario</label>
+            <div className="pill-field">
+              <Icon name="user" size={20} />
+              <input id="u" type="text" autoComplete="username" placeholder="Tu usuario" value={username} onChange={(e) => setUsername(e.target.value)} required />
+            </div>
+            <label htmlFor="p">Contraseña</label>
+            <div className="pill-field">
+              <Icon name="lock" size={20} />
+              <input id="p" type="password" autoComplete="current-password" placeholder="Tu contraseña" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </div>
+            <button className="btn pill block" disabled={busy || !username || !password}>
+              {busy ? <span className="spinner" aria-hidden="true" /> : null}
+              {busy ? 'Ingresando…' : 'Ingresar'}
+              {!busy && <Icon name="arrow" size={18} />}
+            </button>
+          </form>
+          <p className="login-help">¿Problemas para ingresar? Escribe a la psicóloga responsable o a Sanithelp.</p>
+        </section>
+        <div className="login-hero">
+          <span className="hero-blob hb1" aria-hidden="true" />
+          <span className="hero-blob hb2" aria-hidden="true" />
+          <span className="hero-blob hb3" aria-hidden="true" />
+          <p className="hero-welcome">Bienvenidos.</p>
+          <h1><span className="eyebrow">Sanithelp</span> Evaluaciones Psicométricas</h1>
+          <p className="lead">Si vas a responder las evaluaciones, ingresa con la credencial de tu empresa; después te identificarás con tu documento.</p>
+        </div>
+      </div>
     </div>
   );
 }

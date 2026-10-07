@@ -536,10 +536,6 @@ function Pf16View({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
   const people = data?.people ?? [];
   return (
     <>
-      <div className="alert ok" role="status">
-        Calificación pendiente: esta aplicación aplica y registra el 16PF, pero no incluye las claves de corrección ni los baremos del editor (TEA).
-        Descarga la hoja de respuestas de cada persona, o el CSV con todas las respuestas (1 = A, 2 = B, 3 = C, 0 = en blanco) para corregirlas con las plantillas o la plataforma del editor.
-      </div>
       {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
       <div className="row-between">
         <span />
