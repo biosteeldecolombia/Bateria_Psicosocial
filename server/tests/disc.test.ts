@@ -195,6 +195,60 @@ describe('DISC', () => {
     const q = st.json.questionnaires.find((x: { id: string }) => x.id === 'disc');
     expect(q.complete).toBe(false);
     expect(q.answered).toBe(0);
+    // la psicóloga lo ve marcado «por repetir» y puede reabrirlo
+    const row0 = ((await psy.call('GET', `/api/campaigns/${campaignId}/participants`)).json as { id: string; progress: { disc: boolean; discOutdated: boolean } }[])[0]!;
+    expect(row0.progress.disc).toBe(false);
+    expect(row0.progress.discOutdated).toBe(true);
+    const re = await psy.call('POST', `/api/participants/${row0.id}/reopen`, { instrument: 'disc', password: psyPw, reason: 'Respuestas con los grupos antiguos' });
+    expect(re.status, JSON.stringify(re.json)).toBe(200);
+  });
+
+  it('repetir prueba: la psicóloga elige cuál; se borra solo esa, la participación vuelve a «en curso» y la persona la repite', async () => {
+    const { campaignId, cl } = await newCampaign(['psychosocial', 'disc']);
+    await enter(cl, '4000050');
+    const mk = (n: number, v: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [i + 1, v]));
+    expect((await cl.call('PUT', '/api/participation/questionnaires/intra_A', { answers: mk(123, 1), gates: { clients: true, boss: true }, complete: true })).status).toBe(200);
+    expect((await cl.call('PUT', '/api/participation/questionnaires/extra', { answers: mk(31, 1), gates: {}, complete: true })).status).toBe(200);
+    expect((await cl.call('PUT', '/api/participation/questionnaires/stress', { answers: mk(31, 1), gates: {}, complete: true })).status).toBe(200);
+    const all: Record<string, number> = {};
+    for (let g = 1; g <= DISC_GROUPS.length; g++) all[g] = encodeDisc(0, 1);
+    expect((await cl.call('PUT', '/api/participation/questionnaires/disc', { answers: all, complete: true })).status).toBe(200);
+    expect((await cl.call('POST', '/api/participation/submit')).json).toEqual({ received: true });
+    const pid = ((await psy.call('GET', `/api/campaigns/${campaignId}/participants`)).json as { id: string }[])[0]!.id;
+    const url = `/api/participants/${pid}/reopen`;
+
+    // validaciones
+    expect((await psy.call('POST', url, { instrument: 'disc', password: 'incorrecta', reason: 'La persona no entendió las instrucciones' })).status).toBe(403);
+    expect((await psy.call('POST', url, { instrument: 'disc', password: psyPw, reason: 'corto' })).status).toBe(400);
+    expect((await psy.call('POST', url, { instrument: 'valanti', password: psyPw, reason: 'No es parte de la campaña' })).status).toBe(400);
+    expect((await admin.call('POST', url, { instrument: 'disc', password: 'x', reason: 'Sin permiso de contraseña' })).status).toBe(403);
+
+    // se reabre solo el DISC
+    const ok = await psy.call('POST', url, { instrument: 'disc', password: psyPw, reason: 'La persona no entendió las instrucciones' });
+    expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+    expect(ok.json.status).toBe('in_progress');
+    const st = await cl.call('GET', '/api/participation/state');
+    expect(st.json.status).toBe('in_progress');
+    const byId = Object.fromEntries(st.json.questionnaires.map((q: { id: string; complete: boolean }) => [q.id, q.complete]));
+    expect(byId).toEqual({ intra_A: true, extra: true, stress: true, disc: false });
+    expect(st.json.canSubmit).toBe(false);
+    expect((await psy.call('GET', `/api/campaigns/${campaignId}/disc`)).json.people).toHaveLength(0);
+    // ya no hay nada que reabrir en esa prueba
+    expect((await psy.call('POST', url, { instrument: 'disc', password: psyPw, reason: 'Segundo intento seguido' })).status).toBe(409);
+    // queda auditado con el motivo
+    const aud = await env.pool.query("SELECT meta FROM audit_log WHERE action = 'participant.instrument_reopened' AND target_id = $1", [pid]);
+    expect(aud.rows).toHaveLength(1);
+    expect(aud.rows[0].meta.instrument).toBe('disc');
+
+    // la persona la responde de nuevo y vuelve a enviar
+    expect((await cl.call('PUT', '/api/participation/questionnaires/disc', { answers: all, complete: true })).status).toBe(200);
+    expect((await cl.call('POST', '/api/participation/submit')).json).toEqual({ received: true });
+    expect((await psy.call('GET', `/api/campaigns/${campaignId}/disc`)).json.people).toHaveLength(1);
+
+    // con la campaña cerrada no se puede reabrir
+    expect((await psy.call('POST', `/api/campaigns/${campaignId}/status`, { status: 'closed' })).status).toBe(200);
+    const closed = await psy.call('POST', url, { instrument: 'disc', password: psyPw, reason: 'Campaña ya cerrada' });
+    expect(closed.status).toBe(409);
   });
 });
 

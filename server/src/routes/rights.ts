@@ -1,13 +1,19 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { normalizeDocument } from '@sanithelp/shared';
-import { consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
+import { instrumentsFor, normalizeDocument } from '@sanithelp/shared';
+import { campaigns, consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
 import { audit } from '../auth/service.js';
 import { manageableCampaign } from '../auth/access.js';
 import { verifyPassword } from '../security/passwords.js';
 
 import { eraseParticipant } from '../results/erase.js';
+
+const reopenSchema = z.object({
+  instrument: z.string().min(1).max(30),
+  password: z.string().min(1).max(500),
+  reason: z.string().trim().min(10, 'Escribe el motivo (mínimo 10 caracteres).').max(300),
+});
 
 const rectifySchema = z.object({
   names: z.string().trim().min(2).max(100).optional(),
@@ -51,6 +57,39 @@ export const rightsRoutes: FastifyPluginAsync = async (app) => {
     await db.update(participants).set(set).where(eq(participants.id, p.id));
     await audit(db, req.auth!.user.id, 'participant.rectified', { type: 'participant', id: p.id }, { fields: Object.keys(body.data) });
     return { ok: true };
+  });
+
+  /**
+   * Repetir una prueba: la psicóloga decide cuál debe responder de nuevo la persona. Se borran las respuestas de esa prueba
+   * (las demás se conservan) y, si la participación estaba enviada, vuelve a «en curso» para que la persona pueda retomarla
+   * con su código personal. Exige la contraseña y un motivo; queda en la auditoría.
+   */
+  app.post('/participants/:id/reopen', { preHandler: staff }, async (req, reply) => {
+    const p = await target(req);
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const body = reopenSchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message ?? 'Revisa los datos: la prueba, el motivo y tu contraseña.' });
+    const actor = req.auth!.user;
+    if (!(await verifyPassword(actor.passwordHash, body.data.password))) return reply.code(403).send({ error: 'Contraseña incorrecta.' });
+    if (p.status === 'revoked' || p.status === 'declined') return reply.code(409).send({ error: 'Esta participación no admite cambios (no autorizó o sus datos fueron suprimidos).' });
+    const [consent] = await db.select().from(consents).where(eq(consents.participantId, p.id)).limit(1);
+    if (!consent || consent.decision !== 'authorized' || consent.revokedAt) return reply.code(409).send({ error: 'La persona no tiene un consentimiento vigente.' });
+    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, p.campaignId)).limit(1);
+    if (!campaign || campaign.status !== 'open') return reply.code(409).send({ error: 'La campaña está cerrada. Reábrela para que la persona pueda responder de nuevo.' });
+    const plan: string[] = instrumentsFor(campaign.assessments, p.form);
+    if (!plan.includes(body.data.instrument)) return reply.code(400).send({ error: 'Esa prueba no forma parte de la campaña de esta persona.' });
+    const [row] = await db
+      .select({ instrument: questionnaireAnswers.instrument })
+      .from(questionnaireAnswers)
+      .where(and(eq(questionnaireAnswers.participantId, p.id), eq(questionnaireAnswers.instrument, body.data.instrument)))
+      .limit(1);
+    if (!row) return reply.code(409).send({ error: 'La persona todavía no tiene respuestas en esa prueba.' });
+    await db.transaction(async (tx) => {
+      await tx.delete(questionnaireAnswers).where(and(eq(questionnaireAnswers.participantId, p.id), eq(questionnaireAnswers.instrument, body.data.instrument)));
+      if (p.status === 'completed') await tx.update(participants).set({ status: 'in_progress', submittedAt: null }).where(eq(participants.id, p.id));
+    });
+    await audit(db, actor.id, 'participant.instrument_reopened', { type: 'participant', id: p.id }, { instrument: body.data.instrument, reason: body.data.reason });
+    return { ok: true, instrument: body.data.instrument, status: 'in_progress' };
   });
 
   /**

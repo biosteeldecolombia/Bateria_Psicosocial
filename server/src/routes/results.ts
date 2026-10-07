@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { nameParts } from '../results/names.js';
-import { eq, inArray } from 'drizzle-orm';
-import { PF16_ITEMS } from '@sanithelp/shared';
+import { and, eq, inArray } from 'drizzle-orm';
+import { DISC_DATA_VERSION, PF16_ITEMS } from '@sanithelp/shared';
 import {
   DOMAIN_BLOCKS,
   GROUPING_FIELDS,
@@ -61,13 +61,20 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     const cons = ids.length ? await db.select().from(consents).where(inArray(consents.participantId, ids)) : [];
     const fichas = ids.length ? await db.select().from(fichaAnswers).where(inArray(fichaAnswers.participantId, ids)) : [];
     const qs = ids.length ? await db.select({ participantId: questionnaireAnswers.participantId, instrument: questionnaireAnswers.instrument, complete: questionnaireAnswers.complete }).from(questionnaireAnswers).where(inArray(questionnaireAnswers.participantId, ids)) : [];
+    // DISC guardado con los grupos antiguos: no cuenta como respondido y se ofrece repetirlo
+    const staleDisc = new Set<string>();
+    if (ids.length) {
+      for (const r of await db.select({ participantId: questionnaireAnswers.participantId, dataEnc: questionnaireAnswers.dataEnc }).from(questionnaireAnswers).where(and(inArray(questionnaireAnswers.participantId, ids), eq(questionnaireAnswers.instrument, 'disc')))) {
+        if ((JSON.parse(crypto.decrypt(r.dataEnc)) as { v?: number }).v !== DISC_DATA_VERSION) staleDisc.add(r.participantId);
+      }
+    }
     const consentBy = new Map(cons.map((x) => [x.participantId, x]));
     const fichaBy = new Map(fichas.map((x) => [x.participantId, x.complete]));
     await audit(db, actor.id, 'participants.listed', { type: 'campaign', id: c.id });
     return parts
       .map((p) => {
         const cs = consentBy.get(p.id);
-        const done = qs.filter((q) => q.participantId === p.id && q.complete).map((q) => q.instrument);
+        const done = qs.filter((q) => q.participantId === p.id && q.complete && !(q.instrument === 'disc' && staleDisc.has(p.id))).map((q) => q.instrument);
         return {
           id: p.id,
           document: crypto.decrypt(p.documentEnc),
@@ -75,7 +82,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
           status: p.status,
           consent: cs ? (cs.revokedAt ? 'revoked' : cs.decision) : null,
           form: p.form,
-          progress: { ficha: fichaBy.get(p.id) ?? false, intralaboral: done.some((x) => x.startsWith('intra')), extralaboral: done.includes('extra'), estres: done.includes('stress'), disc: done.includes('disc'), valanti: done.includes('valanti'), pf16: done.includes('pf16') },
+          progress: { ficha: fichaBy.get(p.id) ?? false, intralaboral: done.some((x) => x.startsWith('intra')), extralaboral: done.includes('extra'), estres: done.includes('stress'), disc: done.includes('disc'), discOutdated: staleDisc.has(p.id), valanti: done.includes('valanti'), pf16: done.includes('pf16') },
           startedAt: p.createdAt,
           submittedAt: p.submittedAt,
         };

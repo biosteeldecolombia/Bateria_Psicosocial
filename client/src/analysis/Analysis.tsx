@@ -42,7 +42,7 @@ interface Participant {
   status: string;
   consent: string | null;
   form: string | null;
-  progress: { ficha: boolean; intralaboral: boolean; extralaboral: boolean; estres: boolean; disc: boolean; valanti: boolean; pf16: boolean };
+  progress: { ficha: boolean; intralaboral: boolean; extralaboral: boolean; estres: boolean; disc: boolean; discOutdated?: boolean; valanti: boolean; pf16: boolean };
   submittedAt: string | null;
 }
 
@@ -193,6 +193,63 @@ function RightsForm({ person, mode, onClose, onDone }: { person: Participant; mo
   );
 }
 
+/** Pruebas que se pueden repetir, según lo que la persona ya respondió. */
+function repeatOptions(p: Participant): { id: string; label: string }[] {
+  const pr = p.progress;
+  return [
+    pr.intralaboral && p.form ? { id: `intra_${p.form}`, label: `Batería · Intralaboral (forma ${p.form})` } : null,
+    pr.extralaboral ? { id: 'extra', label: 'Batería · Extralaboral' } : null,
+    pr.estres ? { id: 'stress', label: 'Batería · Estrés' } : null,
+    pr.disc || pr.discOutdated ? { id: 'disc', label: pr.discOutdated ? 'DISC (respuestas antiguas, por repetir)' : 'DISC' } : null,
+    pr.valanti ? { id: 'valanti', label: 'VALANTI' } : null,
+    pr.pf16 ? { id: 'pf16', label: '16PF' } : null,
+  ].filter((o): o is { id: string; label: string } => o !== null);
+}
+
+/** La psicóloga elige qué prueba debe responder de nuevo la persona; se borran solo esas respuestas. */
+function RepeatForm({ person, onClose, onDone }: { person: Participant; onClose: () => void; onDone: (m: string) => void }) {
+  const options = repeatOptions(person);
+  const [instrument, setInstrument] = useState('');
+  const [why, setWhy] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await api('POST', `/api/participants/${person.id}/reopen`, { instrument, reason: why, password });
+      onDone(`Se reabrió «${options.find((o) => o.id === instrument)?.label}» de ${person.fullName}. Para responderla de nuevo, la persona entra con la credencial de la campaña y retoma con su documento y su código personal (si lo perdió, usa «Nuevo código»).`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'No se pudo reabrir la prueba.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="alert" onSubmit={submit} noValidate aria-label="Repetir una prueba">
+      <strong>Repetir una prueba de {person.fullName}</strong>
+      <p className="muted">Se borran las respuestas de la prueba que elijas; las demás se conservan. La participación vuelve a «En curso» y la persona debe responderla de nuevo y volver a enviar.</p>
+      {options.length === 0 ? <p>Esta persona todavía no tiene pruebas respondidas.</p> : (
+        <fieldset className="plain">
+          <legend><strong>¿Qué prueba debe repetir?</strong></legend>
+          {options.map((o) => (
+            <label key={o.id} className="check opt"><input type="radio" name={`rep-${person.id}`} checked={instrument === o.id} onChange={() => setInstrument(o.id)} /> {o.label}</label>
+          ))}
+        </fieldset>
+      )}
+      <label htmlFor={`rr-${person.id}`}>Motivo (queda en la auditoría)</label>
+      <input id={`rr-${person.id}`} value={why} onChange={(e) => setWhy(e.target.value)} autoComplete="off" placeholder="Ej. La persona no entendió las instrucciones" />
+      <label htmlFor={`rpw-${person.id}`}>Tu contraseña, para confirmar</label>
+      <input id={`rpw-${person.id}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+      {error && <div className="alert error" role="alert">{error}</div>}
+      <button className="btn" disabled={busy || !instrument || why.trim().length < 10 || !password}>{busy ? 'Reabriendo…' : 'Reabrir la prueba'}</button>{' '}
+      <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+    </form>
+  );
+}
+
 function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?: string) => string; reason: string }) {
   const [tick, setTick] = useState(0);
   const [bulk, setBulk] = useState(false);
@@ -201,6 +258,8 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
   const { data, error, loading } = useLoad<Participant[]>(`/api/campaigns/${campaignId}/participants?t=${tick}`);
   const [code, setCode] = useState<{ name: string; code: string } | null>(null);
   const [rights, setRights] = useState<{ person: Participant; mode: 'edit' | 'erase' } | null>(null);
+  const [repeat, setRepeat] = useState<Participant | null>(null);
+  const [notice, setNotice] = useState('');
   if (loading && !data) return <p role="status">Cargando…</p>;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const rows = data ?? [];
@@ -226,6 +285,8 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
           <button className="btn secondary" onClick={() => setCode(null)}>Ya lo entregué</button>
         </div>
       )}
+      {notice && <div className="alert ok" role="status">{notice} <button className="btn secondary" onClick={() => setNotice('')}>Entendido</button></div>}
+      {repeat && <RepeatForm key={repeat.id} person={repeat} onClose={() => setRepeat(null)} onDone={(m) => { setRepeat(null); setNotice(m); setTick((t) => t + 1); }} />}
       {rights && <RightsForm key={rights.person.id + rights.mode} {...rights} onClose={() => setRights(null)} onDone={() => { setRights(null); setTick((t) => t + 1); }} />}
       {rows.length === 0 ? <p className="muted">Todavía nadie ha iniciado esta campaña.</p> : (
         <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
@@ -240,7 +301,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                   <td>{STATUS[p.status] ?? p.status}</td>
                   <td>{p.consent ? CONSENT[p.consent] : 'Pendiente'}</td>
                   <td>{p.form ?? '—'}</td>
-                  <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés', p.progress.disc && 'DISC', p.progress.valanti && 'VALANTI', p.progress.pf16 && '16PF'].filter(Boolean).join(' · ') || '—'}</td>
+                  <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés', p.progress.disc && 'DISC', p.progress.discOutdated && 'DISC (por repetir)', p.progress.valanti && 'VALANTI', p.progress.pf16 && '16PF'].filter(Boolean).join(' · ') || '—'}</td>
                   <td>
                     {p.consent && (
                       <button className="btn secondary" onClick={async () => { setPdfErr(''); try { await downloadFile(`/api/participants/${p.id}/expediente.pdf${qs()}`, `Expediente_${p.document}.pdf`); } catch (e) { setPdfErr((e as Error).message); } }}>PDF</button>
@@ -250,8 +311,9 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                     )}{' '}
                     {p.status !== 'revoked' && (
                       <>
-                        <button className="btn secondary" onClick={() => setRights({ person: p, mode: 'edit' })}>Corregir</button>{' '}
-                        <button className="btn secondary" onClick={() => setRights({ person: p, mode: 'erase' })}>Suprimir</button>
+                        {p.consent === 'authorized' && repeatOptions(p).length > 0 && <><button className="btn secondary" onClick={() => { setRights(null); setRepeat(p); }}>Repetir prueba</button>{' '}</>}
+                        <button className="btn secondary" onClick={() => { setRepeat(null); setRights({ person: p, mode: 'edit' }); }}>Corregir</button>{' '}
+                        <button className="btn secondary" onClick={() => { setRepeat(null); setRights({ person: p, mode: 'erase' }); }}>Suprimir</button>
                       </>
                     )}
                   </td>

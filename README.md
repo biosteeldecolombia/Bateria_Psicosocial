@@ -28,7 +28,8 @@ Cada campaña (empresa + ronda) elige **qué evaluaciones aplica** al crearla. L
    - *DISC:* puntajes D, I, S, C con su segmento, patrón de perfil con su descripción e **informe PDF** por persona (el informe también se despliega en pantalla con «Ver informe»).
    - *VALANTI:* puntaje directo y estándar por valor (norma nacional 1997), banda, valor más y menos importante, interpretación e **informe PDF** por persona (también desplegable con «Ver informe»).
    - *16PF:* quién lo completó, **hoja de respuestas en PDF** por persona y **CSV** con todas las respuestas (1 = A, 2 = B, 3 = C, 0 = en blanco) para corregir con las plantillas o la plataforma del editor.
-5. **Expediente PDF** (pestaña Participantes): consentimiento firmado electrónicamente (con sus anexos), ficha y las respuestas de la Batería. Las respuestas de DISC, VALANTI y 16PF van en sus propios informes, no en el expediente.
+5. **Repetir una prueba:** en la pestaña Participantes, el botón **«Repetir prueba»** permite elegir cuál prueba debe responder de nuevo la persona (una de la batería, DISC, VALANTI o 16PF). Pide un motivo y tu contraseña, borra solo las respuestas de esa prueba, deja la participación «En curso» y queda en la auditoría. La persona vuelve a entrar con la credencial de la campaña y retoma con su documento y su código personal (si lo perdió, «Nuevo código»). La campaña debe estar abierta.
+6. **Expediente PDF** (pestaña Participantes): consentimiento firmado electrónicamente (con sus anexos), ficha y las respuestas de la Batería. Las respuestas de DISC, VALANTI y 16PF van en sus propios informes, no en el expediente.
 
 ### Lo que debe aprobar la psicóloga (o el asesor legal) antes de usar en producción
 
