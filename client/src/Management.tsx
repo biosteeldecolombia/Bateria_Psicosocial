@@ -5,7 +5,7 @@ import { Analysis } from './analysis/Analysis';
 import { Icon, type IconName } from './icons';
 import { EmptyState, Modal, RowMenu, SecretModal, StatusBadge, useAction, type Secret } from './ui';
 import { Users, type UserRow } from './Users';
-import { Loading } from './BrandLoader';
+import { Loading, PageHero } from './BrandLoader';
 
 interface Company { id: string; name: string; code: string; nit: string | null; minGroupSize: number; active: boolean }
 interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; assessments: string[]; createdAt: string; participantCount: number; stats: { started: number; completed: number; inProgress: number; declined: number; revoked: number } }
@@ -327,10 +327,7 @@ export function Management({ me }: { me: MeResponse }) {
 
         {tab === 'inicio' && (
           <>
-            <div className="page-head">
-              <h1>Hola, {me.fullName}</h1>
-              <p className="muted">Resumen de tu operación. Haz clic en una tarjeta para ver el detalle.</p>
-            </div>
+            <PageHero as="h1" title={`Hola, ${me.fullName}`} lead="Resumen de tu operación. Haz clic en una tarjeta para ver el detalle." />
             {me.role === 'psychologist' && !profileDone && (
               <div className="alert error banner" role="status">
                 <span>Completa tu perfil profesional para poder descargar expedientes en PDF.</span>

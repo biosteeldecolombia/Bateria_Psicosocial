@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { MeResponse } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
 import { DomainTableView, SummaryTables } from './Analysis';
+import { PageHero } from '../BrandLoader';
 
 interface Camp {
   id: string;
@@ -54,9 +55,11 @@ export function CompanyHome({ me }: { me: MeResponse }) {
   }, [campaign, field, value]);
 
   return (
+    <>
+    <PageHero title={`Hola, ${me.fullName}`} lead="Resultados agregados y anónimos de tu organización." />
     <section className="card" aria-labelledby="t">
       <h1 id="t">Reporte de factores de riesgo psicosocial</h1>
-      <p className="muted">Hola, {me.fullName}. Aquí ves resultados <strong>agregados y anónimos</strong> de tu organización. Por confidencialidad no se muestran respuestas ni datos de personas, y los grupos con menos de {camps?.min ?? 5} personas se ocultan.</p>
+      <p className="muted">Aquí ves resultados <strong>agregados y anónimos</strong> de tu organización. Por confidencialidad no se muestran respuestas ni datos de personas, y los grupos con menos de {camps?.min ?? 5} personas se ocultan.</p>
       {error && <div className="alert error" role="alert">{error}</div>}
       {camps && camps.campaigns.length === 0 && <p className="muted">Todavía no hay campañas de aplicación para tu empresa.</p>}
       {camps && camps.campaigns.length > 0 && (
@@ -96,5 +99,6 @@ export function CompanyHome({ me }: { me: MeResponse }) {
         </>
       )}
     </section>
+    </>
   );
 }

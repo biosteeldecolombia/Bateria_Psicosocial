@@ -2,9 +2,23 @@ import { useState } from 'react';
 import type { MeResponse } from '@sanithelp/shared';
 import { api, ApiError } from './api';
 import { Flow } from './flow/Flow';
+import { PageHero } from './BrandLoader';
 
 /** Pantalla del colaborador: se identifica con documento y nombre, o retoma con documento + código personal. */
 export function Participation({ me, onMe }: { me: MeResponse; onMe: (m: MeResponse) => void }) {
+  return (
+    <>
+      <PageHero
+        compact={!!me.participant}
+        title={me.participant ? me.campaignName ?? 'Evaluaciones' : 'Bienvenidos.'}
+        lead={me.participant ? undefined : `${me.campaignName ? `Aplicación: ${me.campaignName}. ` : ''}Tu información es confidencial y solo la ve la psicóloga responsable.`}
+      />
+      <ParticipationBody me={me} onMe={onMe} />
+    </>
+  );
+}
+
+function ParticipationBody({ me, onMe }: { me: MeResponse; onMe: (m: MeResponse) => void }) {
   const [mode, setMode] = useState<'start' | 'resume'>('start');
   const [document, setDocument] = useState('');
   const [names, setNames] = useState('');
@@ -48,7 +62,6 @@ export function Participation({ me, onMe }: { me: MeResponse; onMe: (m: MeRespon
   return (
     <section className="card narrow" aria-labelledby="t">
       <h1 id="t">Identifícate</h1>
-      <p className="muted">{me.campaignName ? `Aplicación: ${me.campaignName}. ` : ''}Tu información es confidencial y solo la ve la psicóloga responsable.</p>
       <div className="seg" role="group" aria-label="¿Qué quieres hacer?">
         <label><input type="radio" name="mode" checked={mode === 'start'} onChange={() => { setMode('start'); setError(''); }} /><span>Es mi primera vez</span></label>
         <label><input type="radio" name="mode" checked={mode === 'resume'} onChange={() => { setMode('resume'); setError(''); }} /><span>Retomar mi avance</span></label>

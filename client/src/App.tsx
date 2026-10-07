@@ -16,6 +16,7 @@ function Shell({ me, onLogout, wide, children }: { me: MeResponse | null; onLogo
   const mainRef = useRef<HTMLElement>(null);
   return (
     <>
+      <Backdrop tone="auto" />
       <a className="skip-link" href="#contenido" onClick={() => mainRef.current?.focus()}>Saltar al contenido</a>
       <header className="topbar">
         <a className="brand" href="/" aria-label={`${PRODUCT_NAME}: inicio`}>

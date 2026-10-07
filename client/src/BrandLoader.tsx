@@ -44,13 +44,31 @@ export function Splash({ label = 'Cargando…' }: { label?: string }) {
   );
 }
 
-/** Fondo animado de las pantallas de ingreso (manchas de color de la marca que se desplazan despacio). */
-export function Backdrop({ tone = 'dark' }: { tone?: 'dark' | 'light' }) {
+/** Fondo animado (manchas de color de la marca que se desplazan despacio). «auto» sigue el tema elegido; en alto contraste no hay manchas. */
+export function Backdrop({ tone = 'dark' }: { tone?: 'dark' | 'light' | 'auto' }) {
   return (
     <div className={`backdrop backdrop-${tone}`} aria-hidden="true">
       <span className="blob blob-a" />
       <span className="blob blob-b" />
       <span className="blob blob-c" />
+    </div>
+  );
+}
+
+/**
+ * Banner de bienvenida con el mismo fluido animado del ingreso. `as` es el elemento del título:
+ * «h1» cuando es el título de la página; «p» cuando la página ya tiene su propio h1.
+ */
+export function PageHero({ title, lead, as = 'p', compact = false, eyebrow = PRODUCT_NAME }: { title: string; lead?: string; as?: 'h1' | 'h2' | 'p'; compact?: boolean; eyebrow?: string }) {
+  const Title = as;
+  return (
+    <div className={`login-hero page-hero${compact ? ' compact' : ''}`}>
+      <span className="hero-blob hb1" aria-hidden="true" />
+      <span className="hero-blob hb2" aria-hidden="true" />
+      <span className="hero-blob hb3" aria-hidden="true" />
+      <p className="hero-eyebrow">{eyebrow}</p>
+      <Title className="hero-title">{title}</Title>
+      {lead && <p className="lead">{lead}</p>}
     </div>
   );
 }

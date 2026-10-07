@@ -502,3 +502,93 @@ input[type='search'] { width: 100%; min-height: 2.75rem; padding: 0.55rem 0.75re
   .hero-welcome { font-size: 2.1rem; }
   .login-form-side { padding: 1.5rem 1.25rem 1.75rem; }
 }
+
+/* =====================================================================
+   Estética de marca en toda la aplicación (la del ingreso): fondo con luz animada,
+   superficies de vidrio, botones y campos redondeados, pestañas en píldora y banner de bienvenida.
+   Usa las variables de tema; en «Alto contraste» no hay vidrio ni decoración.
+   ===================================================================== */
+:root {
+  --stage-bg: linear-gradient(135deg, #f4f7fb 0%, #e3f3f6 60%, #f7efe0 100%);
+  --glass: color-mix(in srgb, var(--surface) 90%, transparent);
+  --glass-border: color-mix(in srgb, var(--border) 55%, transparent);
+  --shadow-soft: 0 14px 40px rgba(31, 42, 68, 0.12);
+  --blob-op: 0.38;
+  --radius: 20px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='contrast']) {
+    --stage-bg: linear-gradient(135deg, #111a30 0%, #1f2a44 45%, #2b3d6b 100%);
+    --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.38);
+    --blob-op: 0.5;
+  }
+}
+:root[data-theme='dark'] { --stage-bg: linear-gradient(135deg, #111a30 0%, #1f2a44 45%, #2b3d6b 100%); --shadow-soft: 0 14px 40px rgba(0, 0, 0, 0.38); --blob-op: 0.5; }
+:root[data-theme='contrast'] { --stage-bg: #000; --glass: var(--surface); --glass-border: var(--border); --shadow-soft: none; --radius: 12px; }
+:root[data-theme='contrast'] .backdrop-auto .blob { display: none; }
+.backdrop-auto { background: var(--stage-bg); }
+.backdrop-auto .blob { opacity: var(--blob-op); }
+
+/* Barra superior de vidrio con línea de color que se desliza */
+.topbar { position: sticky; top: 0; z-index: 40; background: var(--glass); backdrop-filter: blur(14px) saturate(1.2); border-bottom: 0; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12); }
+.topbar::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: linear-gradient(90deg, var(--brand-teal), var(--brand-navy), var(--brand-teal)); background-size: 200% 100%; animation: shimmer 9s linear infinite; }
+:root[data-theme='contrast'] .topbar::after { background: var(--accent); animation: none; }
+@keyframes shimmer { to { background-position: 200% 0; } }
+
+/* Superficies de vidrio */
+.card, .panel, .kpi, .empty, .dialog, .modal, .a11y-panel, .menu {
+  background: var(--glass); backdrop-filter: blur(10px) saturate(1.1); border: 1px solid var(--glass-border); border-radius: var(--radius); box-shadow: var(--shadow-soft);
+}
+.empty { border-style: dashed; }
+.a11y-panel { border: 1px solid var(--glass-border); }
+.kpi, .dialog { position: relative; overflow: hidden; }
+.kpi { border-top: 1px solid var(--glass-border); }
+.kpi::before, .dialog::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 5px; background: linear-gradient(90deg, var(--brand-teal), var(--brand-navy)); }
+.dialog { border-top: 1px solid var(--glass-border); }
+:root[data-theme='contrast'] .kpi::before, :root[data-theme='contrast'] .dialog::before { background: var(--accent); }
+.kpi-icon { background: linear-gradient(135deg, var(--brand-teal), var(--brand-navy)); color: #fff; border-radius: 16px; }
+.alert, .section-note, .idbox, .secret, .codes li { border-radius: 14px; }
+
+/* Botones y campos redondeados */
+.btn { border-radius: 999px; transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, background 0.15s ease; }
+.btn:not([disabled]):hover { transform: translateY(-1px); box-shadow: 0 8px 20px color-mix(in srgb, var(--primary) 35%, transparent); }
+.btn:not(.secondary):not(.danger):not(.pill) { background: linear-gradient(135deg, var(--primary), color-mix(in srgb, var(--primary) 62%, var(--brand-teal))); border-color: transparent; }
+:root[data-theme='contrast'] .btn:not(.secondary):not(.danger):not(.pill) { background: var(--primary); border-color: var(--primary); }
+.btn.secondary { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.icon-btn { border-radius: 50%; }
+input[type='text'], input[type='password'], input[type='email'], input[type='search'], input[type='number'], select {
+  border-radius: 999px; border-width: 1.5px; background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+input[type='text'], input[type='password'], input[type='email'], input[type='number'], select { padding-left: 1.1rem; padding-right: 1.1rem; }
+input[type='search'] { padding-right: 1.1rem; }
+input[type='text']:focus, input[type='password']:focus, input[type='email']:focus, input[type='search']:focus, input[type='number']:focus, select:focus {
+  border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+textarea { border-radius: 16px; }
+
+/* Pestañas en píldora */
+.appnav { border-bottom: 0; }
+.appnav [role='tablist'] { background: var(--glass); border: 1px solid var(--glass-border); border-radius: 999px; padding: 0.3rem; box-shadow: var(--shadow-soft); backdrop-filter: blur(10px); }
+.appnav [role='tab'] { border: 0; margin: 0; border-radius: 999px; min-height: 2.5rem; padding: 0.4rem 1.1rem; transition: background 0.15s ease, color 0.15s ease; }
+.appnav [role='tab'].on { background: var(--primary); color: var(--on-primary); }
+.appnav [role='tab']:hover:not(.on) { background: var(--surface-2); }
+.tabs { border-bottom: 0; gap: 0.35rem; }
+.tabs button { border-radius: 999px; border: 1.5px solid transparent; }
+.tabs button.on { background: var(--primary); color: var(--on-primary); box-shadow: none; border-color: var(--primary); }
+
+/* Pasos y opciones de respuesta */
+.steps li { background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.steps li.current { background: var(--primary); color: var(--on-primary); border-color: transparent; }
+.steps li.current .n { background: color-mix(in srgb, var(--on-primary) 22%, transparent); color: var(--on-primary); }
+.seg span { border-radius: 999px; transition: background 0.15s ease, border-color 0.15s ease; }
+.seg label:hover span { border-color: var(--primary); }
+fieldset.item.missing, .opt { border-radius: 14px; }
+
+/* Banner de bienvenida con el fluido animado (mismo del ingreso) */
+.page-hero { border-radius: 24px; padding: 2rem 2rem 1.75rem; margin-bottom: 1.25rem; min-height: 9.5rem; box-shadow: var(--shadow-soft); }
+.page-hero.compact { min-height: 0; padding: 1.05rem 1.5rem; }
+.hero-eyebrow { margin: 0 0 0.25rem; font-size: 0.78rem; letter-spacing: 0.24em; text-transform: uppercase; opacity: 0.92; animation: rise 0.7s 0.15s ease-out both; }
+.page-hero .hero-title { margin: 0; font-size: clamp(1.5rem, 3.2vw, 2.3rem); font-weight: 800; line-height: 1.12; letter-spacing: -0.01em; text-shadow: 0 2px 16px rgba(10, 18, 40, 0.35); animation: rise 0.8s 0.25s ease-out both; }
+.page-hero.compact .hero-title { font-size: clamp(1.15rem, 2.4vw, 1.5rem); }
+.page-hero .lead { margin: 0.45rem 0 0; max-width: 40rem; font-size: 0.95rem; line-height: 1.5; opacity: 0.95; animation: rise 0.8s 0.35s ease-out both; }
+@media (max-width: 40rem) { .page-hero { padding: 1.4rem 1.25rem; } .page-hero.compact { padding: 0.9rem 1.1rem; } }
