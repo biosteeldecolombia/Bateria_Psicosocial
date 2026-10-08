@@ -496,6 +496,11 @@ export function Management({ me }: { me: MeResponse }) {
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
                         <td className="actions">
+                          <button className="icon-btn" title="Ver usuario y contraseña" aria-label={`Ver usuario y contraseña de ${c.name}`} onClick={() => void act.run(async () => {
+                            const r = await api<{ username: string; password: string | null }>('GET', `/api/campaigns/${c.id}/access`);
+                            if (r.password === null) window.alert('Esta campaña es anterior a esta función y su contraseña no quedó guardada. Usa «Nueva contraseña de acceso» en el menú para generar una que sí se pueda consultar.');
+                            else setSecret({ title: `Acceso de ${c.name}`, username: r.username, password: r.password, view: true });
+                          })}><Icon name="lock" /></button>
                           <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> Resultados</button>
                           <RowMenu
                             label={`Más acciones para ${c.name}`}

@@ -88,7 +88,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     if (!username) return reply.code(500).send({ error: 'No se pudo generar un usuario único. Intenta de nuevo.' });
 
     const password = generateTempPassword(10);
-    const [campaign] = await db.insert(campaigns).values({ companyId: company.id, name: body.data.name, assessments: [...new Set(body.data.assessments)] }).returning();
+    const [campaign] = await db.insert(campaigns).values({ companyId: company.id, name: body.data.name, assessments: [...new Set(body.data.assessments)], accessPasswordEnc: crypto.encrypt(password) }).returning();
     await db.insert(users).values({
       role: 'collaborator',
       usernameBlind: crypto.blindIndex(username),
@@ -112,9 +112,22 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     if (!c || !u) return reply.code(404).send({ error: 'Campaña no encontrada' });
     const password = generateTempPassword(10);
     await db.update(users).set({ passwordHash: await hashPassword(password), failedAttempts: 0, lockedUntil: null }).where(eq(users.id, u.id));
+    await db.update(campaigns).set({ accessPasswordEnc: crypto.encrypt(password) }).where(eq(campaigns.id, c.id));
     await revokeUserSessions(db, u.id);
     await audit(db, actor.id, 'campaign.access_regenerated', { type: 'campaign', id: c.id });
     return { username: crypto.decrypt(u.usernameEnc), password };
+  });
+
+  /** Candado: usuario y contraseña de la campaña. Solo admin o la psicóloga asignada a la empresa (lo decide `manageable`). */
+  app.get('/campaigns/:id/access', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const actor = req.auth!.user;
+    const c = uuidParam(id) ? await manageable(id, actor.id, actor.role) : null;
+    const u = c ? await accessUserOf(c.id) : null;
+    if (!c || !u) return reply.code(404).send({ error: 'Campaña no encontrada' });
+    await audit(db, actor.id, 'campaign.access_viewed', { type: 'campaign', id: c.id });
+    reply.header('Cache-Control', 'no-store');
+    return { username: crypto.decrypt(u.usernameEnc), password: c.accessPasswordEnc ? crypto.decrypt(c.accessPasswordEnc) : null };
   });
 
   /** Abrir o cerrar la campaña. Al cerrar, la credencial deja de funcionar y se cierran las sesiones abiertas. */

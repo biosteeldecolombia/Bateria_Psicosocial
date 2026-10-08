@@ -75,7 +75,7 @@ export function Modal({ title, onClose, children, size = 'md', icon, dismissOnOu
   );
 }
 
-export interface Secret { title: string; username: string; password: string }
+export interface Secret { title: string; username: string; password: string; /** Consulta de una credencial ya existente (candado): se puede volver a ver. */ view?: boolean }
 
 /** Credenciales entregadas una sola vez, en el centro de la pantalla. No se cierra al pulsar fuera: la contraseña no se vuelve a mostrar. */
 export function SecretModal({ s, onClose }: { s: Secret; onClose: () => void }) {

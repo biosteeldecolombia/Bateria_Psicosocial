@@ -219,6 +219,12 @@ describe('autorización y CSRF', () => {
 
     const other = await admin.call('POST', '/api/campaigns', { companyId: b.json.id, name: 'De B' });
     expect((await psy.call('POST', `/api/campaigns/${other.json.id}/regenerate-access`)).status).toBe(404);
+    // Candado: la asignada ve usuario y contraseña; la de otra empresa no; el admin ve todas.
+    const mine = await psy.call('POST', '/api/campaigns', { companyId: a.json.id, name: 'Con candado' });
+    const seen = await psy.call('GET', `/api/campaigns/${mine.json.id}/access`);
+    expect(seen.json).toEqual({ username: mine.json.username, password: mine.json.password });
+    expect((await psy.call('GET', `/api/campaigns/${other.json.id}/access`)).status).toBe(404);
+    expect((await admin.call('GET', `/api/campaigns/${other.json.id}/access`)).json.password).toBe(other.json.password);
     expect((await psy.call('POST', `/api/campaigns/${other.json.id}/status`, { status: 'closed' })).status).toBe(404);
     expect((await psy.call('GET', '/api/campaigns')).json.every((c: { companyId: string }) => c.companyId === a.json.id)).toBe(true);
 

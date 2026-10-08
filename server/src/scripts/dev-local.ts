@@ -74,9 +74,9 @@ if (!hasAdmin) {
     })
     .returning({ id: users.id });
   await db.insert(psychologistCompanies).values({ userId: psy!.id, companyId: co!.id });
-  const [camp] = await db.insert(campaigns).values({ companyId: co!.id, name: 'Ronda de demostración' }).returning();
   const accessUser = 'DEMO-1000';
   const accessPw = generateTempPassword(10);
+  const [camp] = await db.insert(campaigns).values({ companyId: co!.id, name: 'Ronda de demostración', accessPasswordEnc: crypto.encrypt(accessPw) }).returning();
   await db.insert(users).values({
     role: 'collaborator',
     usernameBlind: crypto.blindIndex(accessUser),

@@ -43,6 +43,13 @@
       "when": 1791381808262,
       "tag": "0005_flowery_kabuki",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791469745663,
+      "tag": "0006_campaign_access_password",
+      "breakpoints": true
     }
   ]
 }

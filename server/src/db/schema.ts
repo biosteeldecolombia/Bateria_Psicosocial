@@ -32,6 +32,8 @@ export const campaigns = pgTable('campaigns', {
   assessments: jsonb('assessments').$type<string[]>().notNull().default(sql`'["psychosocial"]'::jsonb`),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
+  /** Contraseña de la credencial compartida, cifrada, para que la psicóloga asignada (o un admin) la consulte. Null en campañas antiguas hasta regenerarla. */
+  accessPasswordEnc: text('access_password_enc'),
 });
 
 export const users = pgTable(
