@@ -234,6 +234,8 @@ export const formOf = (cargoIndex: number): Form => (cargoIndex <= 1 ? 'A' : 'B'
 
 export interface FullInput {
   cargoIndex: number;
+  /** Forma fijada a mano por la psicóloga; si falta, se deduce del tipo de cargo (pregunta 14). */
+  form?: Form;
   intra: { answers: Answers; gates: Gates };
   extra: { answers: Answers };
   stress: { answers: Answers };
@@ -248,8 +250,8 @@ export interface FullResult {
 }
 
 export function scoreAll(input: FullInput): FullResult {
-  const form = formOf(input.cargoIndex);
-  const cargo = cargoGroupOf(input.cargoIndex);
+  const form = input.form ?? formOf(input.cargoIndex);
+  const cargo = input.form ? (input.form === 'A' ? '12' : '34') : cargoGroupOf(input.cargoIndex);
   const intra = scoreIntralaboral(form, input.intra.answers, input.intra.gates);
   const extra = scoreExtralaboral(input.extra.answers, cargo);
   return { form, cargo, intra, extra, stress: scoreStress(input.stress.answers, cargo), total: scoreTotal(form, intra, extra) };

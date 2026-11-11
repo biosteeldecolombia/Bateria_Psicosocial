@@ -92,11 +92,13 @@ export async function loadRecords(db: Db, crypto: Crypto, campaignId: string, on
     const ficha = JSON.parse(crypto.decrypt(f.dataEnc)) as FichaAnswers;
     const personal = fichaToCodes(ficha, crypto.decrypt(p.documentEnc), isoDate(f.updatedAt));
     if (personal.tipoCargo === undefined) continue;
+    if (p.formManual) personal.formOverride = form;
     const di = JSON.parse(crypto.decrypt(intraQ.dataEnc)) as StoredQ;
     const de = JSON.parse(crypto.decrypt(extraQ.dataEnc)) as StoredQ;
     const ds = JSON.parse(crypto.decrypt(stressQ.dataEnc)) as StoredQ;
     const full = scoreAll({
       cargoIndex: personal.tipoCargo,
+      form: p.formManual ? form : undefined,
       intra: { answers: toAnswers(di.answers), gates: di.gates },
       extra: { answers: toAnswers(de.answers) },
       stress: { answers: toAnswers(ds.answers) },

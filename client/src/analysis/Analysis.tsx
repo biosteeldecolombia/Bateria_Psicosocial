@@ -43,6 +43,7 @@ interface Participant {
   status: string;
   consent: string | null;
   form: string | null;
+  formManual?: boolean;
   progress: { ficha: boolean; intralaboral: boolean; extralaboral: boolean; estres: boolean; disc: boolean; discOutdated?: boolean; valanti: boolean; pf16: boolean };
   submittedAt: string | null;
 }
@@ -251,6 +252,41 @@ function RepeatForm({ person, onClose, onDone }: { person: Participant; onClose:
   );
 }
 
+/** La psicóloga fija la forma intralaboral (A o B) cuando difiere de la que resulta de la pregunta 14. */
+function FormSwitch({ person, onClose, onDone }: { person: Participant; onClose: () => void; onDone: (m: string) => void }) {
+  const next = person.form === 'A' ? 'B' : 'A';
+  const [why, setWhy] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      const r = await api<{ needsIntra: boolean; status: string }>('POST', `/api/participants/${person.id}/form`, { form: next, reason: why, password });
+      onDone(`${person.fullName} quedó en la forma ${next}.${r.needsIntra ? ` Debe responder el intralaboral de la forma ${next}: entra con la credencial de la campaña y retoma con su documento y su código personal (si lo perdió, usa «Nuevo código»).` : ''}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'No se pudo cambiar la forma.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="alert" onSubmit={submit} noValidate aria-label="Cambiar la forma">
+      <strong>Cambiar a la forma {next} · {person.fullName}</strong>
+      <p className="muted">Hoy está en la forma {person.form}{person.formManual ? ' (fijada a mano)' : ' (según la pregunta 14 de la ficha)'}. Se conservan todas las respuestas; si todavía no tiene completo el intralaboral de la forma {next}, la participación vuelve a «En curso» para que lo responda. Los resultados se calculan con la forma {next}.</p>
+      <label htmlFor={`fm-${person.id}`}>Motivo (queda en la auditoría)</label>
+      <input id={`fm-${person.id}`} value={why} onChange={(e) => setWhy(e.target.value)} autoComplete="off" placeholder="Ej. Su cargo real es operativo, aunque marcó jefatura" />
+      <label htmlFor={`fpw-${person.id}`}>Tu contraseña, para confirmar</label>
+      <input id={`fpw-${person.id}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+      {error && <div className="alert error" role="alert">{error}</div>}
+      <button className="btn" disabled={busy || why.trim().length < 10 || !password}>{busy ? 'Guardando…' : `Pasar a la forma ${next}`}</button>{' '}
+      <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+    </form>
+  );
+}
+
 function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?: string) => string; reason: string }) {
   const [tick, setTick] = useState(0);
   const [bulk, setBulk] = useState(false);
@@ -260,6 +296,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
   const [code, setCode] = useState<{ name: string; code: string } | null>(null);
   const [rights, setRights] = useState<{ person: Participant; mode: 'edit' | 'erase' } | null>(null);
   const [repeat, setRepeat] = useState<Participant | null>(null);
+  const [formFor, setFormFor] = useState<Participant | null>(null);
   const [notice, setNotice] = useState('');
   if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
@@ -288,6 +325,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
       )}
       {notice && <div className="alert ok" role="status">{notice} <button className="btn secondary" onClick={() => setNotice('')}>Entendido</button></div>}
       {repeat && <RepeatForm key={repeat.id} person={repeat} onClose={() => setRepeat(null)} onDone={(m) => { setRepeat(null); setNotice(m); setTick((t) => t + 1); }} />}
+      {formFor && <FormSwitch key={formFor.id} person={formFor} onClose={() => setFormFor(null)} onDone={(m) => { setFormFor(null); setNotice(m); setTick((t) => t + 1); }} />}
       {rights && <RightsForm key={rights.person.id + rights.mode} {...rights} onClose={() => setRights(null)} onDone={() => { setRights(null); setTick((t) => t + 1); }} />}
       {rows.length === 0 ? <p className="muted">Todavía nadie ha iniciado esta campaña.</p> : (
         <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
@@ -301,7 +339,16 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                   <td>{p.fullName}</td>
                   <td>{STATUS[p.status] ?? p.status}</td>
                   <td>{p.consent ? CONSENT[p.consent] : 'Pendiente'}</td>
-                  <td>{p.form ?? '—'}</td>
+                  <td>
+                    {p.form ? (
+                      <div role="group" aria-label={`Forma de ${p.fullName}`} style={{ display: 'inline-flex', gap: 2 }}>
+                        {(['A', 'B'] as const).map((f) => (
+                          <button key={f} type="button" className={p.form === f ? 'btn' : 'btn secondary'} aria-pressed={p.form === f} disabled={p.status === 'revoked' || p.status === 'declined'} title={p.form === f ? `Forma ${f}` : `Pasar a la forma ${f}`} onClick={() => { if (p.form !== f) { setRepeat(null); setRights(null); setFormFor(p); } }}>{f}</button>
+                        ))}
+                      </div>
+                    ) : '—'}
+                    {p.formManual && <div className="muted">manual</div>}
+                  </td>
                   <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés', p.progress.disc && 'DISC', p.progress.discOutdated && 'DISC (por repetir)', p.progress.valanti && 'VALANTI', p.progress.pf16 && '16PF'].filter(Boolean).join(' · ') || '—'}</td>
                   <td>
                     {p.consent && (
@@ -312,9 +359,9 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                     )}{' '}
                     {p.status !== 'revoked' && (
                       <>
-                        {p.consent === 'authorized' && repeatOptions(p).length > 0 && <><button className="btn secondary" onClick={() => { setRights(null); setRepeat(p); }}>Repetir prueba</button>{' '}</>}
-                        <button className="btn secondary" onClick={() => { setRepeat(null); setRights({ person: p, mode: 'edit' }); }}>Corregir</button>{' '}
-                        <button className="btn secondary" onClick={() => { setRepeat(null); setRights({ person: p, mode: 'erase' }); }}>Suprimir</button>
+                        {p.consent === 'authorized' && repeatOptions(p).length > 0 && <><button className="btn secondary" onClick={() => { setRights(null); setFormFor(null); setRepeat(p); }}>Repetir prueba</button>{' '}</>}
+                        <button className="btn secondary" onClick={() => { setRepeat(null); setFormFor(null); setRights({ person: p, mode: 'edit' }); }}>Corregir</button>{' '}
+                        <button className="btn secondary" onClick={() => { setRepeat(null); setFormFor(null); setRights({ person: p, mode: 'erase' }); }}>Suprimir</button>
                       </>
                     )}
                   </td>

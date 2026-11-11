@@ -1,0 +1,1 @@
+ALTER TABLE "participants" ADD COLUMN "form_manual" boolean DEFAULT false NOT NULL;

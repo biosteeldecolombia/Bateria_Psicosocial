@@ -93,6 +93,8 @@ export const participants = pgTable(
     resumeLockedUntil: timestamp('resume_locked_until', { withTimezone: true }),
     /** Se define con la pregunta 14 de la ficha (Fase 2); la psicóloga ve si hay discrepancia. */
     form: formEnum('form'),
+    /** true cuando la psicóloga fijó la forma a mano: la ficha ya no la recalcula con la pregunta 14. */
+    formManual: boolean('form_manual').notNull().default(false),
     status: participantStatusEnum('status').notNull().default('in_progress'),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

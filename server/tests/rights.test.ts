@@ -54,6 +54,27 @@ describe('derechos del titular', () => {
     expect(audit.rows[0].n).toBeGreaterThanOrEqual(3);
   });
 
+  it('cambia la forma a mano: exige motivo y contraseña, conserva respuestas, reabre si falta el intralaboral y audita', async () => {
+    type P = { id: string; form: string | null; formManual: boolean; status: string };
+    const get = async () => (await psy.call('GET', `/api/campaigns/${campaignId}/participants`)).json as P[];
+    const a = (await get()).find((x) => x.status === 'completed' && x.form === 'A')!;
+    const base = { form: 'B', reason: 'Su cargo real es operativo', password: psyPw };
+    expect((await psy.call('POST', `/api/participants/${a.id}/form`, { ...base, password: 'mala' })).status).toBe(403);
+    expect((await psy.call('POST', `/api/participants/${a.id}/form`, { ...base, reason: 'corto' })).status).toBe(400);
+    expect((await psy.call('POST', `/api/participants/${a.id}/form`, { ...base, form: 'A' })).status).toBe(409);
+    const before = (await psy.call('GET', `/api/campaigns/${campaignId}/results`)).json.rows.length;
+    const r = await psy.call('POST', `/api/participants/${a.id}/form`, base);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ form: 'B', needsIntra: true, status: 'in_progress' });
+    const after = (await get()).find((x) => x.id === a.id)!;
+    expect(after).toMatchObject({ form: 'B', formManual: true, status: 'in_progress' });
+    const kept = await env.pool.query("SELECT instrument FROM questionnaire_answers WHERE participant_id = $1 AND instrument = 'intra_A'", [a.id]);
+    expect(kept.rows.length).toBe(1); // no se borra nada
+    expect((await psy.call('GET', `/api/campaigns/${campaignId}/results`)).json.rows.length).toBe(before - 1); // sin intra_B no hay resultado
+    const audit = await env.pool.query("SELECT count(*)::int AS n FROM audit_log WHERE action = 'participant.form_changed'");
+    expect(audit.rows[0].n).toBe(1);
+  });
+
   it('retención: simula sin borrar y, con confirmación, suprime lo que supera el plazo', async () => {
     const { db, pool } = createDb(env.cfg);
     const crypto = createCrypto(env.cfg);

@@ -199,7 +199,7 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
       .insert(fichaAnswers)
       .values({ participantId: p.id, dataEnc, complete })
       .onConflictDoUpdate({ target: fichaAnswers.participantId, set: { dataEnc, complete, updatedAt: new Date() } });
-    if (complete) {
+    if (complete && !p.formManual) {
       const form = formFromCargo(String(data['14']));
       await db.update(participants).set({ form }).where(eq(participants.id, p.id));
       p.form = form;

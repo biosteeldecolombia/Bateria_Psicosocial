@@ -44,6 +44,8 @@ export interface PersonalCodes {
   antiguedadEmpresa?: number;
   cargo?: string;
   tipoCargo?: number;
+  /** Forma fijada a mano por la psicóloga (si existe, prevalece sobre la deducida del tipo de cargo). */
+  formOverride?: 'A' | 'B';
   antiguedadCargo?: number;
   area?: string;
   contrato?: number;
@@ -75,7 +77,7 @@ export function personalColumns(p: PersonalCodes): (string | number)[] {
     p.antiguedadEmpresa ?? 0,
     p.cargo ?? 0,
     pick(RPS_LABELS.tipoCargo, p.tipoCargo),
-    p.tipoCargo === undefined ? NO_RESPONDE : p.tipoCargo <= 1 ? 'A' : 'B',
+    p.formOverride ?? (p.tipoCargo === undefined ? NO_RESPONDE : p.tipoCargo <= 1 ? 'A' : 'B'),
     p.antiguedadCargo ?? 0,
     p.area ?? 0,
     pick(RPS_LABELS.contrato, p.contrato),
