@@ -206,8 +206,8 @@ describe('flujo del colaborador', () => {
 
     // La auditoría registra las lecturas sin datos personales
     const log = await admin.call('GET', '/api/admin/audit?limit=500');
-    expect(log.json.some((e: { action: string }) => e.action === 'results.viewed')).toBe(true);
-    expect(JSON.stringify(log.json)).not.toContain('Persona Uno');
+    expect(log.json.rows.some((e: { action: string }) => e.action === 'results.viewed')).toBe(true);
+    expect(JSON.stringify((await env.pool.query('SELECT * FROM audit_log')).rows)).not.toContain('Persona Uno');
 
     // Restablecer el código personal
     const list = await p1.call('GET', `/api/campaigns/${c.campaignId}/participants`);

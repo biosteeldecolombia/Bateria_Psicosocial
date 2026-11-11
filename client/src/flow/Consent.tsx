@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ConsentBlock } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
+import { ConsentHeader, type ConsentHeaderData } from './ConsentHeader';
 import type { FlowState } from './Flow';
 
 interface ConsentInfo {
@@ -8,7 +9,7 @@ interface ConsentInfo {
   date: string;
   hash: string;
   /** Documentos que aplican a la campaña (batería psicosocial y/o evaluación ocupacional) y opciones de decisión. */
-  docs: { id: string; title: string; blocks: ConsentBlock[] }[];
+  docs: { id: string; title: string; blocks: ConsentBlock[]; header: ConsentHeaderData | null }[];
   options: { lead: string; authorize: string; decline: string };
   company: string;
   addenda: { id: string; title: string; paragraphs: string[] }[];
@@ -55,6 +56,7 @@ export function Consent({ onDone }: { onDone: (s: FlowState) => void }) {
       <div className="doc" role="region" aria-label="Texto del consentimiento informado" tabIndex={0}>
         {info?.docs.map((d) => (
           <div key={d.id}>
+            {d.header && <ConsentHeader header={d.header} />}
             <p><strong>{d.title}</strong></p>
             {d.blocks.map((b, i) => {
               const text = b.text.replace('{empresa}', info.company || '________________');

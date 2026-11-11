@@ -40,6 +40,15 @@ export const CONSENT_OCC_BLOCKS: ConsentBlock[] = [
   { kind: 'p', text: 'EXISTE LA POSIBILIDAD DE REVOCAR EL CONSENTIMIENTO EN CUALQUIER MOMENTO, EN TAL CASO DEBE INFORMAR SU DECISIÓN AL PROFESIONAL DE LA SALUD.' },
 ];
 
+/** Encabezado del documento (cuadro con logo, título, código, versión, fecha, página y proceso). */
+export const CONSENT_OCC_HEADER = {
+  title: 'CONSENTIMIENTO INFORMADO PARA EVALUACION PSICOLOGIA OCUPACIONAL',
+  process: 'PROCESO: PRESTACIÓN DE SERVICIOS',
+  code: 'FP-PS-CI',
+  version: '01',
+  date: '25/03/2026',
+} as const;
+
 export const CONSENT_OCC_OPTIONS = {
   authorize: 'AUTORIZO la realización de la evaluación psicológica ocupacional descrita en este documento.',
   decline: 'NO AUTORIZO la realización de la evaluación.',
@@ -61,10 +70,12 @@ export interface ConsentDoc {
   title: string;
   blocks: ConsentBlock[];
   options: { authorize: string; decline: string };
+  /** Encabezado con código y versión que se muestra encima del texto (si el documento lo lleva). */
+  header?: typeof CONSENT_OCC_HEADER;
 }
 
 const BASE_DOC: ConsentDoc = { id: 'psychosocial', label: 'Batería psicosocial', title: CONSENT_TITLE, blocks: CONSENT_BLOCKS, options: CONSENT_OPTIONS };
-const OCC_DOC: ConsentDoc = { id: 'occupational', label: 'Evaluación ocupacional', title: CONSENT_OCC_TITLE, blocks: CONSENT_OCC_BLOCKS, options: CONSENT_OCC_OPTIONS };
+const OCC_DOC: ConsentDoc = { id: 'occupational', label: 'Evaluación ocupacional', title: CONSENT_OCC_TITLE, blocks: CONSENT_OCC_BLOCKS, options: CONSENT_OCC_OPTIONS, header: CONSENT_OCC_HEADER };
 
 /** Evaluaciones que usan el consentimiento ocupacional. */
 export const OCCUPATIONAL_ASSESSMENTS = ['acrofobia', 'claustrofobia'] as const;

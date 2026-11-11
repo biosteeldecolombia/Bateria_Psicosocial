@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import fs from 'node:fs';
 import { randomInt } from 'node:crypto';
 import { campaignStatusSchema, createCampaignSchema, updateCampaignSchema } from '@sanithelp/shared';
-import { campaigns, companies, consents, exportJobs, fichaAnswers, participants, psychologistCompanies, questionnaireAnswers, users } from '../db/schema.js';
+import { assistantCampaigns, campaigns, companies, consents, exportJobs, fichaAnswers, participants, psychologistCompanies, questionnaireAnswers, users } from '../db/schema.js';
+import { allowedCompanyIds as allowedIds, assistantScope, manageableCampaign } from '../auth/access.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
 import { generateTempPassword, hashPassword, verifyPassword } from '../security/passwords.js';
 
@@ -16,33 +17,32 @@ const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-
 export const campaignRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
   const staff = app.requireReady('admin', 'psychologist');
+  // El auxiliar administrativo solo consulta el listado de las campañas que se le asignaron.
+  const staffOrAssistant = app.requireReady('admin', 'psychologist', 'assistant');
 
-  async function allowedCompanyIds(userId: string, role: string): Promise<string[] | 'all'> {
-    if (role === 'admin') return 'all';
-    return (await db.select({ id: psychologistCompanies.companyId }).from(psychologistCompanies).where(eq(psychologistCompanies.userId, userId))).map((r) => r.id);
-  }
+  const allowedCompanyIds = (userId: string, role: string) => allowedIds(db, userId, role);
 
   /** Devuelve la campaña si el usuario puede gestionarla; si no, null (el llamador responde 404 sin revelar nada). */
-  async function manageable(id: string, userId: string, role: string) {
-    const [c] = await db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
-    if (!c) return null;
-    const ids = await allowedCompanyIds(userId, role);
-    return ids === 'all' || ids.includes(c.companyId) ? c : null;
-  }
+  const manageable = (id: string, userId: string, role: string) => manageableCampaign(db, userId, role, id);
 
   async function accessUserOf(campaignId: string) {
     const [u] = await db.select().from(users).where(and(eq(users.campaignId, campaignId), eq(users.role, 'collaborator'))).limit(1);
     return u ?? null;
   }
 
-  app.get('/campaigns', { preHandler: staff }, async (req) => {
+  app.get('/campaigns', { preHandler: staffOrAssistant }, async (req) => {
     const actor = req.auth!.user;
     const ids = await allowedCompanyIds(actor.id, actor.role);
+    const extra = actor.role === 'assistant' ? (await assistantScope(db, actor.id)).campaignIds : [];
     const rows =
       ids === 'all'
         ? await db.select().from(campaigns).orderBy(desc(campaigns.createdAt))
-        : ids.length
-          ? await db.select().from(campaigns).where(inArray(campaigns.companyId, ids)).orderBy(desc(campaigns.createdAt))
+        : ids.length || extra.length
+          ? await db
+              .select()
+              .from(campaigns)
+              .where(or(...(ids.length ? [inArray(campaigns.companyId, ids)] : []), ...(extra.length ? [inArray(campaigns.id, extra)] : [])))
+              .orderBy(desc(campaigns.createdAt))
           : [];
     // Totales por campaña y estado (sin abrir los resultados): iniciaron, completaron, en curso, no autorizaron, revocaron.
     const stats = new Map<string, { started: number; completed: number; inProgress: number; declined: number; revoked: number }>();
@@ -62,7 +62,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     for (const c of rows) {
       const u = await accessUserOf(c.id);
       const st = stats.get(c.id) ?? { started: 0, completed: 0, inProgress: 0, declined: 0, revoked: 0 };
-      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', responsibleName: c.responsibleUserId ? respNames.get(c.responsibleUserId) ?? null : null, accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
+      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', responsibleName: c.responsibleUserId ? respNames.get(c.responsibleUserId) ?? null : null, accessUsername: u && actor.role !== 'assistant' ? crypto.decrypt(u.usernameEnc) : null });
     }
     return out;
   });
@@ -215,6 +215,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       // Las sesiones se borran con el usuario (cascada) o quedan sin participante (set null).
       await tx.delete(participants).where(eq(participants.campaignId, c.id));
       await tx.delete(exportJobs).where(eq(exportJobs.campaignId, c.id));
+      await tx.delete(assistantCampaigns).where(eq(assistantCampaigns.campaignId, c.id));
       if (access.length) await tx.delete(users).where(inArray(users.id, access.map((u) => u.id)));
       await tx.delete(campaigns).where(eq(campaigns.id, c.id));
     });

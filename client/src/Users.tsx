@@ -1,13 +1,15 @@
 import { useState, type FormEvent } from 'react';
 import { api } from './api';
 import { Icon } from './icons';
-import { EmptyState, Modal, RowMenu, StatusBadge, useAction } from './ui';
+import { EmptyState, Modal, RowMenu, SelectAll, StatusBadge, useAction } from './ui';
 import { Loading } from './BrandLoader';
+import { SignatureEditor } from './Signature';
 
 export interface Company { id: string; name: string; code: string }
+export interface CampaignLite { id: string; name: string; companyName: string }
 export interface UserRow {
   id: string;
-  role: 'admin' | 'psychologist' | 'company';
+  role: 'admin' | 'psychologist' | 'assistant' | 'company';
   username: string;
   fullName: string;
   professionalRegistry: string;
@@ -19,9 +21,11 @@ export interface UserRow {
   createdAt: string;
   lastLoginAt: string | null;
   companies: Company[];
+  /** Solo auxiliar administrativo: campañas sueltas asignadas. */
+  campaigns?: CampaignLite[];
 }
 
-export const ROLE_LABEL: Record<UserRow['role'], string> = { admin: 'Administrador', psychologist: 'Psicóloga', company: 'Empresa cliente' };
+export const ROLE_LABEL: Record<UserRow['role'], string> = { admin: 'Administrador', psychologist: 'Psicóloga', assistant: 'Auxiliar administrativo', company: 'Empresa cliente' };
 
 /** Permisos de cada rol, tal como los aplica el servidor. */
 const PERMISSIONS: Record<UserRow['role'], string[]> = {
@@ -38,6 +42,12 @@ const PERMISSIONS: Record<UserRow['role'], string[]> = {
     'Gestionar derechos de titulares de sus empresas',
     'Editar su perfil profesional (documento y registro)',
   ],
+  assistant: [
+    'Ver el listado de personas de las empresas o campañas que se le asignaron',
+    'Descargar expedientes y todos los informes en PDF de esas empresas o campañas (indicando el motivo)',
+    'Sin acceso a resultados en pantalla ni a gestionar personas, campañas o cuentas',
+    'Verificación en dos pasos obligatoria; todo queda en la auditoría',
+  ],
   company: ['Ver únicamente los reportes agregados de su empresa', 'Sin acceso a respuestas individuales ni a la gestión de campañas'],
 };
 
@@ -48,7 +58,8 @@ function CompanyPicker({ role, companies, value, onChange, name }: { role: UserR
   if (role === 'admin') return <p className="muted">El administrador accede a todas las empresas.</p>;
   return (
     <fieldset className="plain" style={{ marginTop: '1rem' }}>
-      <legend>{role === 'psychologist' ? 'Empresas que atiende' : 'Empresa'}</legend>
+      <legend>{role === 'psychologist' ? 'Empresas que atiende' : role === 'assistant' ? 'Empresas completas a las que ayuda (todas sus campañas)' : 'Empresa'}</legend>
+      {role !== 'company' && <SelectAll total={companies.length} selected={companies.filter((c) => value.includes(c.id)).length} onChange={(all) => onChange(all ? companies.map((c) => c.id) : [])} />}
       <div className="checks">
         {companies.map((c) => (
           <label className="check" key={c.id}>
@@ -67,6 +78,33 @@ function CompanyPicker({ role, companies, value, onChange, name }: { role: UserR
   );
 }
 
+/** Campañas sueltas (agrupadas por empresa) a las que tiene acceso un auxiliar, además de las empresas completas. */
+function CampaignPicker({ campaigns, value, onChange }: { campaigns: CampaignLite[]; value: string[]; onChange: (v: string[]) => void }) {
+  const groups = [...new Set(campaigns.map((c) => c.companyName))].sort((a, b) => a.localeCompare(b, 'es'));
+  return (
+    <fieldset className="plain" style={{ marginTop: '1rem' }}>
+      <legend>Campañas sueltas a las que ayuda</legend>
+      <SelectAll total={campaigns.length} selected={campaigns.filter((c) => value.includes(c.id)).length} onChange={(all) => onChange(all ? campaigns.map((c) => c.id) : [])} />
+      {campaigns.length === 0 && <p className="muted">Todavía no hay campañas.</p>}
+      {groups.map((g) => {
+        const own = campaigns.filter((c) => c.companyName === g);
+        return (
+          <div key={g} style={{ marginBottom: '0.5rem' }}>
+            <SelectAll total={own.length} selected={own.filter((c) => value.includes(c.id)).length} label={g} onChange={(all) => onChange(all ? [...new Set([...value, ...own.map((c) => c.id)])] : value.filter((x) => !own.some((c) => c.id === x)))} />
+            <div className="checks" style={{ marginLeft: '1.25rem' }}>
+              {own.map((c) => (
+                <label className="check" key={c.id}>
+                  <input type="checkbox" checked={value.includes(c.id)} onChange={(e) => onChange(e.target.checked ? [...value, c.id] : value.filter((x) => x !== c.id))} /> {c.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </fieldset>
+  );
+}
+
 function PermissionList({ role }: { role: UserRow['role'] }) {
   return (
     <ul className="perm-list" aria-label={`Permisos del rol ${ROLE_LABEL[role]}`}>
@@ -75,7 +113,7 @@ function PermissionList({ role }: { role: UserRow['role'] }) {
   );
 }
 
-function UserForm({ companies, user, onDone, onSecret, onClose }: { companies: Company[]; user: UserRow | null; onDone: () => Promise<void>; onSecret: (title: string, username: string, password: string) => void; onClose: () => void }) {
+function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { companies: Company[]; campaigns: CampaignLite[]; user: UserRow | null; onDone: () => Promise<void>; onSecret: (title: string, username: string, password: string) => void; onClose: () => void }) {
   const act = useAction();
   const [role, setRole] = useState<UserRow['role']>(user?.role ?? 'psychologist');
   const [username, setUsername] = useState(user?.username ?? '');
@@ -83,6 +121,7 @@ function UserForm({ companies, user, onDone, onSecret, onClose }: { companies: C
   const [doc, setDoc] = useState(user?.professionalDocument ?? '');
   const [reg, setReg] = useState(user?.professionalRegistry ?? '');
   const [ids, setIds] = useState<string[]>(user?.companies.map((c) => c.id) ?? []);
+  const [campIds, setCampIds] = useState<string[]>(user?.campaigns?.map((c) => c.id) ?? []);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -90,6 +129,7 @@ function UserForm({ companies, user, onDone, onSecret, onClose }: { companies: C
       const extra = {
         ...(role === 'company' ? { companyId: ids[0] } : {}),
         ...(role === 'psychologist' ? { assignedCompanyIds: ids, professionalRegistry: reg, professionalDocument: doc } : {}),
+        ...(role === 'assistant' ? { assignedCompanyIds: ids, assignedCampaignIds: campIds } : {}),
       };
       if (user) {
         await api('PUT', `/api/admin/users/${user.id}`, { role, username, fullName, ...extra });
@@ -99,6 +139,7 @@ function UserForm({ companies, user, onDone, onSecret, onClose }: { companies: C
         const r = await api<{ username: string; password: string }>('POST', '/api/admin/users', {
           role, username, fullName,
           ...(role === 'psychologist' ? { assignedCompanyIds: ids, ...(reg ? { professionalRegistry: reg } : {}), ...(doc ? { professionalDocument: doc } : {}) } : {}),
+          ...(role === 'assistant' ? { assignedCompanyIds: ids, assignedCampaignIds: campIds } : {}),
           ...(role === 'company' ? { companyId: ids[0] } : {}),
         });
         await onDone();
@@ -115,8 +156,9 @@ function UserForm({ companies, user, onDone, onSecret, onClose }: { companies: C
         <div className="form-grid">
           <div>
             <label htmlFor="uf-role">Rol</label>
-            <select id="uf-role" value={role} onChange={(e) => { setRole(e.target.value as UserRow['role']); setIds([]); }}>
+            <select id="uf-role" value={role} onChange={(e) => { setRole(e.target.value as UserRow['role']); setIds([]); setCampIds([]); }}>
               <option value="psychologist">Psicóloga</option>
+              <option value="assistant">Auxiliar administrativo (descarga documentos)</option>
               <option value="admin">Administrador</option>
               <option value="company">Empresa cliente (solo reportes)</option>
             </select>
@@ -143,6 +185,7 @@ function UserForm({ companies, user, onDone, onSecret, onClose }: { companies: C
           )}
         </div>
         <CompanyPicker role={role} companies={companies} value={ids} onChange={setIds} name="uf-co" />
+        {role === 'assistant' && <CampaignPicker campaigns={campaigns} value={campIds} onChange={setCampIds} />}
         <h3 className="sub">Permisos del rol</h3>
         <PermissionList role={role} />
         {user && <p className="muted">Si cambias el rol o el correo, se cerrarán las sesiones abiertas de esta cuenta.</p>}
@@ -153,6 +196,13 @@ function UserForm({ companies, user, onDone, onSecret, onClose }: { companies: C
           </button>
         </div>
       </form>
+      {user && user.role === 'psychologist' && (
+        <section aria-labelledby={`uf-sig-${user.id}`} style={{ marginTop: '1.25rem' }}>
+          <h3 id={`uf-sig-${user.id}`} className="sub">Firma de la psicóloga</h3>
+          <p className="muted">Se imprime en los documentos de las campañas de las que ella es responsable. Cada cambio queda en la auditoría.</p>
+          <SignatureEditor base={`/api/admin/users/${user.id}`} idPrefix={`uf-${user.id}`} />
+        </section>
+      )}
     </Modal>
   );
 }
@@ -188,10 +238,11 @@ function PasswordForm({ user, onSecret, onClose }: { user: UserRow; onSecret: (t
   );
 }
 
-export function Users({ rows, loaded, companies, reload, onSecret, openNew, onCloseNew }: {
+export function Users({ rows, loaded, companies, campaigns, reload, onSecret, openNew, onCloseNew }: {
   rows: UserRow[];
   loaded: boolean;
   companies: Company[];
+  campaigns: CampaignLite[];
   reload: () => Promise<void>;
   onSecret: (title: string, username: string, password: string) => void;
   openNew: boolean;
@@ -226,6 +277,7 @@ export function Users({ rows, loaded, companies, reload, onSecret, openNew, onCl
             <option value="">Todos los roles</option>
             <option value="admin">Administrador</option>
             <option value="psychologist">Psicóloga</option>
+            <option value="assistant">Auxiliar administrativo</option>
             <option value="company">Empresa cliente</option>
           </select>
         </div>
@@ -251,8 +303,8 @@ export function Users({ rows, loaded, companies, reload, onSecret, openNew, onCl
                 <tr key={u.id}>
                   <td><strong>{u.fullName || '—'}</strong></td>
                   <td><code>{u.username || '—'}</code></td>
-                  <td><span className="chip"><Icon name={u.role === 'admin' ? 'shield' : u.role === 'psychologist' ? 'user' : 'building'} size={14} /> {ROLE_LABEL[u.role]}</span></td>
-                  <td>{u.role === 'admin' ? 'Todas' : u.companies.length ? u.companies.map((c) => c.name).join(', ') : <span className="muted">Sin asignar</span>}</td>
+                  <td><span className="chip"><Icon name={u.role === 'admin' ? 'shield' : u.role === 'psychologist' || u.role === 'assistant' ? 'user' : 'building'} size={14} /> {ROLE_LABEL[u.role]}</span></td>
+                  <td>{u.role === 'admin' ? 'Todas' : u.companies.length || u.campaigns?.length ? <>{u.companies.map((c) => c.name).join(', ')}{u.campaigns?.length ? <span className="muted">{u.companies.length ? ' · ' : ''}{u.campaigns.length} {u.campaigns.length === 1 ? 'campaña suelta' : 'campañas sueltas'}</span> : null}</> : <span className="muted">Sin asignar</span>}</td>
                   <td>
                     <StatusBadge on={u.active} onText="Activa" offText="Desactivada" />
                     {u.locked && <span className="badge warn"><Icon name="lock" size={12} /> Bloqueada</span>}
@@ -272,6 +324,13 @@ export function Users({ rows, loaded, companies, reload, onSecret, openNew, onCl
                             onSecret(`Nueva contraseña para ${nameOf(u)}`, u.username, r.password);
                           }),
                         },
+                        ...(u.locked ? [{
+                          label: 'Desbloquear cuenta (intentos fallidos)', icon: 'key' as const, onSelect: () => void act.run(async () => {
+                            if (!window.confirm(`¿Desbloquear la cuenta de ${nameOf(u)}? Hazlo solo si confirmaste que fue la propia persona.`)) return;
+                            await api('POST', `/api/admin/users/${u.id}/unlock`);
+                            await reload();
+                          }),
+                        }] : []),
                         {
                           label: u.active ? 'Desactivar cuenta' : 'Activar cuenta', icon: 'power', danger: u.active, onSelect: () => void act.run(async () => {
                             if (u.active && !window.confirm(`¿Desactivar la cuenta de ${nameOf(u)}? Se cerrarán sus sesiones.`)) return;
@@ -289,8 +348,8 @@ export function Users({ rows, loaded, companies, reload, onSecret, openNew, onCl
         </div>
       )}
 
-      {openNew && <UserForm companies={companies} user={null} onDone={reload} onSecret={onSecret} onClose={onCloseNew} />}
-      {edit && <UserForm key={edit.id} companies={companies} user={edit} onDone={reload} onSecret={onSecret} onClose={() => setEdit(null)} />}
+      {openNew && <UserForm companies={companies} campaigns={campaigns} user={null} onDone={reload} onSecret={onSecret} onClose={onCloseNew} />}
+      {edit && <UserForm key={edit.id} companies={companies} campaigns={campaigns} user={edit} onDone={reload} onSecret={onSecret} onClose={() => setEdit(null)} />}
       {pwdUser && <PasswordForm user={pwdUser} onSecret={onSecret} onClose={() => setPwdUser(null)} />}
     </>
   );

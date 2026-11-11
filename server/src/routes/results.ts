@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { nameParts } from '../results/names.js';
 import { and, eq, inArray } from 'drizzle-orm';
-import { DISC_DATA_VERSION, PF16_ITEMS, isClqLevel } from '@sanithelp/shared';
+import { DISC_DATA_VERSION, FORMATOS, FORMATO_KINDS, PF16_ITEMS, isClqLevel, parseFormatoData, type FormatoKind } from '@sanithelp/shared';
 import {
   DOMAIN_BLOCKS,
   GROUPING_FIELDS,
@@ -17,7 +17,7 @@ import {
   type GroupingField,
   type RpsRow,
 } from '@sanithelp/scoring';
-import { consents, fichaAnswers, manualResults, participants, questionnaireAnswers } from '../db/schema.js';
+import { campaigns, consents, fichaAnswers, manualResults, participants, questionnaireAnswers } from '../db/schema.js';
 import { audit } from '../auth/service.js';
 import { manageableCampaign } from '../auth/access.js';
 import { clinicalAccess as clinical } from '../auth/clinical.js';
@@ -26,6 +26,7 @@ import { discView, loadDisc } from '../results/disc.js';
 import { loadValanti, valantiView } from '../results/valanti.js';
 import { loadIndividual } from '../results/individual.js';
 import { acrofobiaView, clqView, loadAcrofobia, loadClq } from '../results/ocupacionales.js';
+import { formatoInstrument, formatoTestView, loadFormatoContext } from '../results/formatos.js';
 import { newResumeCode, normalizeCode } from './participation.js';
 
 const csvCell = (v: unknown) => {
@@ -51,7 +52,8 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     return GROUPING_FIELDS.includes(f as GroupingField) ? (f as GroupingField) : null;
   };
 
-  app.get('/campaigns/:id/participants', { preHandler: staff }, async (req, reply) => {
+  // Listado (identidad y estado, sin resultados): también lo ve el auxiliar administrativo de las campañas que se le asignaron.
+  app.get('/campaigns/:id/participants', { preHandler: app.requireReady('admin', 'psychologist', 'assistant') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const actor = req.auth!.user;
     const c = await manageableCampaign(db, actor.id, actor.role, id);
@@ -223,6 +225,65 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
       .onConflictDoUpdate({ target: [manualResults.participantId, manualResults.instrument], set: { dataEnc, updatedBy: req.auth!.user.id, updatedAt: new Date() } });
     await audit(db, req.auth!.user.id, 'results.claustrofobia_marked', { type: 'participant', id }, { level });
     return { ok: true, level };
+  });
+
+  /** Participante, campaña y formato del pedido; responde 404/403 y devuelve null si no corresponde. */
+  async function formatoTarget(req: FastifyRequest, reply: FastifyReply) {
+    const { id, kind } = req.params as { id: string; kind: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p || !(FORMATO_KINDS as readonly string[]).includes(kind)) {
+      reply.code(404).send({ error: 'Participante o formato no encontrado' });
+      return null;
+    }
+    const c = await clinicalAccess(req, reply, p.campaignId);
+    if (!c) return null;
+    const [camp] = await db.select().from(campaigns).where(eq(campaigns.id, c.id)).limit(1);
+    if (!camp?.assessments.includes(FORMATOS[kind as FormatoKind].assessment)) {
+      reply.code(404).send({ error: 'Esta campaña no aplica ese formato.' });
+      return null;
+    }
+    return { p, c, kind: kind as FormatoKind };
+  }
+
+  /** Formato de evaluación psicológica ocupacional: resultados del test, datos precargados y lo que la psicóloga ya diligenció. */
+  app.get('/participants/:id/formatos/:kind', { preHandler: staff }, async (req, reply) => {
+    const t = await formatoTarget(req, reply);
+    if (!t) return;
+    const ctx = await loadFormatoContext(db, crypto, t.p, t.kind);
+    if (!ctx.record) return reply.code(404).send({ error: 'Esta persona aún no completa el cuestionario (debe enviar sus respuestas).' });
+    await audit(db, req.auth!.user.id, 'results.formato_viewed', { type: 'participant', id: t.p.id }, { kind: t.kind });
+    return {
+      kind: t.kind,
+      participantId: t.p.id,
+      person: ctx.person,
+      prefill: ctx.prefill,
+      test: formatoTestView(t.kind, ctx.record),
+      saved: ctx.saved,
+    };
+  });
+
+  /** Guarda lo que la psicóloga diligencia en el panel (cifrado). En espacios confinados también guarda la interpretación del CLQ. */
+  app.put('/participants/:id/formatos/:kind', { preHandler: staff, bodyLimit: 100_000 }, async (req, reply) => {
+    const t = await formatoTarget(req, reply);
+    if (!t) return;
+    const data = parseFormatoData(t.kind, req.body);
+    if (!data) return reply.code(400).send({ error: 'Revisa los campos del formato (texto demasiado largo o datos no válidos).' });
+    const ctx = await loadFormatoContext(db, crypto, t.p, t.kind);
+    if (!ctx.record) return reply.code(404).send({ error: 'Esta persona aún no completa el cuestionario.' });
+    const actor = req.auth!.user.id;
+    const upsert = (instrument: string, payload: unknown) =>
+      db
+        .insert(manualResults)
+        .values({ participantId: t.p.id, instrument, dataEnc: crypto.encrypt(JSON.stringify(payload)), updatedBy: actor })
+        .onConflictDoUpdate({ target: [manualResults.participantId, manualResults.instrument], set: { dataEnc: crypto.encrypt(JSON.stringify(payload)), updatedBy: actor, updatedAt: new Date() } });
+    await upsert(formatoInstrument(t.kind), data);
+    const clq = (req.body as { clqLevel?: unknown }).clqLevel;
+    if (t.kind === 'confinados' && clq !== undefined && clq !== null) {
+      if (!isClqLevel(clq)) return reply.code(400).send({ error: 'Elige el nivel: bajo, moderado o alto.' });
+      await upsert('claustrofobia', { level: clq });
+    }
+    await audit(db, actor, 'results.formato_saved', { type: 'participant', id: t.p.id }, { kind: t.kind, concept: data.concept });
+    return { ok: true };
   });
 
   /** 16PF: quién completó el cuestionario (la calificación no está incluida: requiere las plantillas y baremos del editor). */

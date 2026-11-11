@@ -12,15 +12,16 @@ export * from './acrofobia';
 export * from './claustrofobia';
 export * from './ficha';
 
-export const ROLES = ['admin', 'psychologist', 'collaborator', 'company'] as const;
+export const ROLES = ['admin', 'psychologist', 'collaborator', 'company', 'assistant'] as const;
 export type Role = (typeof ROLES)[number];
 
 /** Roles que deben usar MFA (TOTP). */
-export const MFA_ROLES: readonly Role[] = ['admin', 'psychologist'];
+export const MFA_ROLES: readonly Role[] = ['admin', 'psychologist', 'assistant'];
 
 export const MIN_PASSWORD_LENGTH: Record<Role, number> = {
   admin: 12,
   psychologist: 12,
+  assistant: 12,
   company: 12,
   collaborator: 8,
 };
@@ -29,6 +30,7 @@ export const MIN_PASSWORD_LENGTH: Record<Role, number> = {
 export const IDLE_MINUTES: Record<Role, number> = {
   admin: 15,
   psychologist: 15,
+  assistant: 15,
   company: 15,
   collaborator: 30,
 };
@@ -82,6 +84,8 @@ export const createCompanySchema = z.object({
   nit: z.string().trim().max(30).optional(),
   code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/),
   minGroupSize: z.number().int().min(2).max(100).default(5),
+  /** Psicólogas responsables de la empresa (las que ven sus campañas y resultados). */
+  psychologistIds: z.array(z.string().uuid()).max(50).optional(),
 });
 
 export const updateCompanySchema = z.object({
@@ -90,30 +94,35 @@ export const updateCompanySchema = z.object({
   code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/).optional(),
   minGroupSize: z.number().int().min(2).max(100).optional(),
   active: z.boolean().optional(),
+  psychologistIds: z.array(z.string().uuid()).max(50).optional(),
 });
 
 export const updateCampaignSchema = z
   .object({ name: z.string().trim().min(2).max(200).optional(), responsibleId: z.string().uuid().nullable().optional() })
   .refine((b) => b.name !== undefined || b.responsibleId !== undefined);
 
-/** Cuentas de personas (admin, psicóloga, empresa). Los colaboradores no tienen cuenta: usan la credencial de la campaña. */
+/** Cuentas de personas (admin, psicóloga, auxiliar administrativo, empresa). Los colaboradores no tienen cuenta: usan la credencial de la campaña. */
 export const createUserSchema = z.object({
-  role: z.enum(['admin', 'psychologist', 'company']),
+  role: z.enum(['admin', 'psychologist', 'assistant', 'company']),
   username: z.string().trim().min(3).max(200),
   fullName: z.string().trim().min(2).max(200),
   companyId: z.string().uuid().optional(),
   assignedCompanyIds: z.array(z.string().uuid()).optional(),
+  /** Solo auxiliar administrativo: campañas sueltas a las que además tiene acceso. */
+  assignedCampaignIds: z.array(z.string().uuid()).optional(),
   professionalRegistry: z.string().trim().max(100).optional(),
   professionalDocument: z.string().trim().max(40).optional(),
 });
 
 /** Edición de una cuenta de persona: todos los campos son opcionales. */
 export const updateUserSchema = z.object({
-  role: z.enum(['admin', 'psychologist', 'company']).optional(),
+  role: z.enum(['admin', 'psychologist', 'assistant', 'company']).optional(),
   username: z.string().trim().min(3).max(200).optional(),
   fullName: z.string().trim().min(2).max(200).optional(),
   companyId: z.string().uuid().optional(),
   assignedCompanyIds: z.array(z.string().uuid()).optional(),
+  /** Solo auxiliar administrativo: campañas sueltas a las que además tiene acceso. */
+  assignedCampaignIds: z.array(z.string().uuid()).optional(),
   professionalRegistry: z.string().trim().max(100).optional(),
   professionalDocument: z.string().trim().max(40).optional(),
 });
@@ -159,3 +168,4 @@ export interface MeResponse {
   participant: { status: 'in_progress' | 'completed' | 'declined' | 'revoked' } | null;
   campaignName: string | null;
 }
+export * from './formatos';

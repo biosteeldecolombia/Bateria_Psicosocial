@@ -15,13 +15,14 @@ export async function clinicalAccess(db: Db, req: FastifyRequest, reply: Fastify
     reply.code(404).send({ error: 'Campaña no encontrada' });
     return null;
   }
-  if (actor.role === 'admin') {
+  // El administrador y el auxiliar administrativo no atienden a las personas: deben justificar cada acceso (queda en la auditoría).
+  if (actor.role === 'admin' || actor.role === 'assistant') {
     const j = String(justification ?? (req.query as { justification?: string }).justification ?? '').trim();
     if (j.length < 10) {
-      reply.code(403).send({ error: 'Como administrador debes indicar el motivo del acceso (mínimo 10 caracteres).', needsJustification: true });
+      reply.code(403).send({ error: `Como ${actor.role === 'admin' ? 'administrador' : 'auxiliar administrativo'} debes indicar el motivo del acceso (mínimo 10 caracteres).`, needsJustification: true });
       return null;
     }
-    await audit(db, actor.id, 'results.admin_access', { type: 'campaign', id: c.id }, { justification: j.slice(0, 300) });
+    await audit(db, actor.id, actor.role === 'admin' ? 'results.admin_access' : 'results.assistant_access', { type: 'campaign', id: c.id }, { justification: j.slice(0, 300) });
   }
   return c;
 }

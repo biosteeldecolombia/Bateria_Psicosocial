@@ -1,8 +1,10 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { createCompanySchema, createUserSchema, updateCompanySchema, updateUserSchema, MFA_ROLES } from '@sanithelp/shared';
-import { auditLog, campaigns, companies, psychologistCompanies, users } from '../db/schema.js';
+import { assistantCampaigns, assistantCompanies, auditLog, campaigns, companies, psychologistCompanies, users } from '../db/schema.js';
+import { assistantScope } from '../auth/access.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
+import { parseSignature, signatureOfEnc } from './profile.js';
 import { generateTempPassword, hashPassword, validatePasswordPolicy, verifyPassword } from '../security/passwords.js';
 
 const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
@@ -14,13 +16,23 @@ const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-
 export const adminRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
 
+  /** Verdadero si todos los ids son de psicólogas activas. */
+  async function allPsychologists(ids: string[]) {
+    if (!ids.length) return true;
+    const rows = await db.select({ id: users.id }).from(users).where(and(inArray(users.id, ids), eq(users.role, 'psychologist'), eq(users.active, true)));
+    return rows.length === new Set(ids).size;
+  }
+
   app.post('/admin/companies', { preHandler: app.requireReady('admin') }, async (req, reply) => {
     const body = createCompanySchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const [dup] = await db.select({ id: companies.id }).from(companies).where(eq(companies.code, body.data.code)).limit(1);
     if (dup) return reply.code(409).send({ error: 'Ya existe una empresa con ese código.' });
-    const [row] = await db.insert(companies).values(body.data).returning();
-    await audit(db, req.auth!.user.id, 'company.created', { type: 'company', id: row!.id });
+    const { psychologistIds, ...values } = body.data;
+    if (psychologistIds && !(await allPsychologists(psychologistIds))) return reply.code(400).send({ error: 'Alguna de las psicólogas elegidas no existe o está desactivada.' });
+    const [row] = await db.insert(companies).values(values).returning();
+    if (psychologistIds?.length) await db.insert(psychologistCompanies).values(psychologistIds.map((userId) => ({ userId, companyId: row!.id })));
+    await audit(db, req.auth!.user.id, 'company.created', { type: 'company', id: row!.id }, { psychologists: psychologistIds?.length ?? 0 });
     return reply.code(201).send(row);
   });
 
@@ -36,6 +48,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       const [dup] = await db.select({ id: companies.id }).from(companies).where(eq(companies.code, d.code)).limit(1);
       if (dup) return reply.code(409).send({ error: 'Ya existe una empresa con ese código.' });
     }
+    if (d.psychologistIds && !(await allPsychologists(d.psychologistIds))) return reply.code(400).send({ error: 'Alguna de las psicólogas elegidas no existe o está desactivada.' });
     const set: Partial<typeof companies.$inferInsert> = {};
     if (d.name !== undefined) set.name = d.name;
     if (d.nit !== undefined) set.nit = d.nit || null;
@@ -45,6 +58,12 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     let closed = 0;
     await db.transaction(async (tx) => {
       if (Object.keys(set).length) await tx.update(companies).set(set).where(eq(companies.id, id));
+      if (d.psychologistIds) {
+        // Reemplaza las psicólogas de esta empresa (las asignaciones de las demás empresas no cambian).
+        await tx.delete(psychologistCompanies).where(eq(psychologistCompanies.companyId, id));
+        const ids = [...new Set(d.psychologistIds)];
+        if (ids.length) await tx.insert(psychologistCompanies).values(ids.map((userId) => ({ userId, companyId: id })));
+      }
       if (d.active === false && co.active) {
         const open = await tx.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.companyId, id), eq(campaigns.status, 'open')));
         closed = open.length;
@@ -55,7 +74,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       const access = await db.select({ id: users.id }).from(users).where(and(eq(users.companyId, id), eq(users.role, 'collaborator')));
       for (const u of access) await revokeUserSessions(db, u.id);
     }
-    await audit(db, req.auth!.user.id, d.active === undefined ? 'company.updated' : d.active ? 'company.activated' : 'company.deactivated', { type: 'company', id }, { fields: Object.keys(d), campaignsClosed: closed });
+    await audit(db, req.auth!.user.id, d.active === undefined ? 'company.updated' : d.active ? 'company.activated' : 'company.deactivated', { type: 'company', id }, { fields: Object.keys(d), campaignsClosed: closed, ...(d.psychologistIds ? { psychologists: d.psychologistIds.length } : {}) });
     return { ok: true, campaignsClosed: closed };
   });
 
@@ -73,19 +92,37 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     if (acct) return reply.code(409).send({ error: 'Hay cuentas de empresa cliente asociadas. Cámbiales la empresa o desactívalas primero.' });
     await db.transaction(async (tx) => {
       await tx.delete(psychologistCompanies).where(eq(psychologistCompanies.companyId, id));
+      await tx.delete(assistantCompanies).where(eq(assistantCompanies.companyId, id));
       await tx.delete(companies).where(eq(companies.id, id));
     });
     await audit(db, req.auth!.user.id, 'company.deleted', { type: 'company', id });
     return { ok: true };
   });
 
-  app.get('/companies', { preHandler: app.requireReady('admin', 'psychologist') }, async (req) => {
+  app.get('/companies', { preHandler: app.requireReady('admin', 'psychologist', 'assistant') }, async (req) => {
     const actor = req.auth!.user;
     if (actor.role === 'admin') return db.select().from(companies).orderBy(companies.name);
-    const ids = (await db.select({ id: psychologistCompanies.companyId }).from(psychologistCompanies).where(eq(psychologistCompanies.userId, actor.id))).map((r) => r.id);
+    let ids: string[];
+    if (actor.role === 'assistant') {
+      // Empresas asignadas completas y empresas de las campañas sueltas que se le asignaron
+      const scope = await assistantScope(db, actor.id);
+      const viaCampaigns = scope.campaignIds.length ? (await db.select({ id: campaigns.companyId }).from(campaigns).where(inArray(campaigns.id, scope.campaignIds))).map((r) => r.id) : [];
+      ids = [...new Set([...scope.companyIds, ...viaCampaigns])];
+    } else {
+      ids = (await db.select({ id: psychologistCompanies.companyId }).from(psychologistCompanies).where(eq(psychologistCompanies.userId, actor.id))).map((r) => r.id);
+    }
     if (!ids.length) return [];
     return db.select().from(companies).where(inArray(companies.id, ids)).orderBy(companies.name);
   });
+
+  /** Mensaje de error si alguna empresa o campaña asignada no existe; null si todo es válido. */
+  async function invalidAssignments(companyIds: string[], campaignIds: string[]): Promise<string | null> {
+    const cos = [...new Set(companyIds)];
+    const cas = [...new Set(campaignIds)];
+    if (cos.length && (await db.select({ id: companies.id }).from(companies).where(inArray(companies.id, cos))).length !== cos.length) return 'Empresa inexistente.';
+    if (cas.length && (await db.select({ id: campaigns.id }).from(campaigns).where(inArray(campaigns.id, cas))).length !== cas.length) return 'Campaña inexistente.';
+    return null;
+  }
 
   app.post('/admin/users', { preHandler: app.requireReady('admin') }, async (req, reply) => {
     const body = createUserSchema.safeParse(req.body);
@@ -95,6 +132,10 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     if (input.companyId) {
       const [c] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, input.companyId)).limit(1);
       if (!c) return reply.code(400).send({ error: 'Empresa inexistente.' });
+    }
+    if (input.role === 'assistant') {
+      const bad = await invalidAssignments(input.assignedCompanyIds ?? [], input.assignedCampaignIds ?? []);
+      if (bad) return reply.code(400).send({ error: bad });
     }
     const blind = crypto.blindIndex(input.username);
     const [dup] = await db.select({ id: users.id }).from(users).where(eq(users.usernameBlind, blind)).limit(1);
@@ -118,6 +159,10 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     if (input.role === 'psychologist' && input.assignedCompanyIds?.length) {
       await db.insert(psychologistCompanies).values(input.assignedCompanyIds.map((companyId) => ({ userId: row!.id, companyId })));
     }
+    if (input.role === 'assistant') {
+      if (input.assignedCompanyIds?.length) await db.insert(assistantCompanies).values([...new Set(input.assignedCompanyIds)].map((companyId) => ({ userId: row!.id, companyId })));
+      if (input.assignedCampaignIds?.length) await db.insert(assistantCampaigns).values([...new Set(input.assignedCampaignIds)].map((campaignId) => ({ userId: row!.id, campaignId })));
+    }
     await audit(db, req.auth!.user.id, 'user.created', { type: 'user', id: row!.id }, { role: input.role, mfaRequired: MFA_ROLES.includes(input.role) });
     // La contraseña se muestra una sola vez; no se guarda en claro.
     return reply.code(201).send({ id: row!.id, username: input.username, password });
@@ -125,10 +170,13 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
   /** Cuentas de personas (no incluye las credenciales compartidas de colaboradores), con sus empresas asignadas. Solo administrador. */
   app.get('/admin/users', { preHandler: app.requireReady('admin') }, async () => {
-    const rows = await db.select().from(users).where(inArray(users.role, ['admin', 'psychologist', 'company'])).orderBy(users.createdAt);
+    const rows = await db.select().from(users).where(inArray(users.role, ['admin', 'psychologist', 'assistant', 'company'])).orderBy(users.createdAt);
     const cos = await db.select({ id: companies.id, name: companies.name, code: companies.code }).from(companies);
     const coById = new Map(cos.map((c) => [c.id, c]));
     const links = await db.select().from(psychologistCompanies);
+    const aLinks = await db.select().from(assistantCompanies);
+    const aCamps = await db.select().from(assistantCampaigns);
+    const campById = new Map((await db.select({ id: campaigns.id, name: campaigns.name, companyId: campaigns.companyId }).from(campaigns)).map((c) => [c.id, c]));
     const safe = (enc: string | null) => {
       if (!enc) return '';
       try {
@@ -138,7 +186,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       }
     };
     return rows.map((u) => {
-      const ids = u.role === 'psychologist' ? links.filter((l) => l.userId === u.id).map((l) => l.companyId) : u.companyId ? [u.companyId] : [];
+      const ids = u.role === 'psychologist' ? links.filter((l) => l.userId === u.id).map((l) => l.companyId) : u.role === 'assistant' ? aLinks.filter((l) => l.userId === u.id).map((l) => l.companyId) : u.companyId ? [u.companyId] : [];
       return {
         id: u.id,
         role: u.role,
@@ -153,8 +201,43 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         createdAt: u.createdAt,
         lastLoginAt: u.lastLoginAt,
         companies: ids.map((id) => coById.get(id)).filter((c): c is NonNullable<typeof c> => !!c),
+        campaigns: u.role === 'assistant' ? aCamps.filter((l) => l.userId === u.id).map((l) => campById.get(l.campaignId)).filter((c): c is NonNullable<typeof c> => !!c).map((c) => ({ id: c.id, name: c.name, companyName: coById.get(c.companyId)?.name ?? '' })) : [],
       };
     });
+  });
+
+  /** Psicóloga destino de las rutas de firma, o null (404). */
+  async function psychologist(id: unknown) {
+    if (!uuidParam(id)) return null;
+    const [u] = await db.select().from(users).where(and(eq(users.id, id), eq(users.role, 'psychologist'))).limit(1);
+    return u ?? null;
+  }
+
+  /** El administrador ve, carga, reemplaza o quita la imagen de la firma de una psicóloga. */
+  app.get('/admin/users/:id/signature', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+    const u = await psychologist((req.params as { id: string }).id);
+    if (!u) return reply.code(404).send({ error: 'Psicóloga no encontrada' });
+    await audit(db, req.auth!.user.id, 'user.signature_viewed', { type: 'user', id: u.id });
+    reply.header('Cache-Control', 'no-store');
+    return { signature: signatureOfEnc((v) => crypto.decrypt(v), u.signatureEnc) };
+  });
+
+  app.put('/admin/users/:id/signature', { preHandler: app.requireReady('admin'), bodyLimit: 700_000 }, async (req, reply) => {
+    const u = await psychologist((req.params as { id: string }).id);
+    if (!u) return reply.code(404).send({ error: 'Psicóloga no encontrada' });
+    const sig = parseSignature((req.body as { image?: unknown } | null)?.image);
+    if (!sig) return reply.code(400).send({ error: 'La firma debe ser una imagen PNG o JPG de hasta 400 KB.' });
+    await db.update(users).set({ signatureEnc: crypto.encrypt(JSON.stringify(sig)) }).where(eq(users.id, u.id));
+    await audit(db, req.auth!.user.id, 'user.signature_set_by_admin', { type: 'user', id: u.id });
+    return { ok: true };
+  });
+
+  app.delete('/admin/users/:id/signature', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+    const u = await psychologist((req.params as { id: string }).id);
+    if (!u) return reply.code(404).send({ error: 'Psicóloga no encontrada' });
+    await db.update(users).set({ signatureEnc: null }).where(eq(users.id, u.id));
+    await audit(db, req.auth!.user.id, 'user.signature_removed_by_admin', { type: 'user', id: u.id });
+    return { ok: true };
   });
 
   /** Reemplaza las empresas que atiende una psicóloga. Solo administrador. */
@@ -213,6 +296,12 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     let companyId: string | null = newRole === 'company' ? (input.companyId ?? target.companyId) : null;
     if (newRole === 'company' && !companyId) return reply.code(400).send({ error: 'La empresa es obligatoria para este rol.' });
     const wanted = newRole === 'psychologist' ? input.assignedCompanyIds : undefined;
+    const wantedA = newRole === 'assistant' ? input.assignedCompanyIds : undefined;
+    const wantedAC = newRole === 'assistant' ? input.assignedCampaignIds : undefined;
+    if (newRole === 'assistant') {
+      const bad = await invalidAssignments(wantedA ?? [], wantedAC ?? []);
+      if (bad) return reply.code(400).send({ error: bad });
+    }
     const check = [...new Set([...(companyId ? [companyId] : []), ...(wanted ?? [])])];
     if (check.length) {
       const found = await db.select({ id: companies.id }).from(companies).where(inArray(companies.id, check));
@@ -222,6 +311,21 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
 
     await db.transaction(async (tx) => {
       if (Object.keys(set).length) await tx.update(users).set(set).where(eq(users.id, id));
+      if (newRole !== 'assistant') {
+        await tx.delete(assistantCompanies).where(eq(assistantCompanies.userId, id));
+        await tx.delete(assistantCampaigns).where(eq(assistantCampaigns.userId, id));
+      } else {
+        if (wantedA) {
+          await tx.delete(assistantCompanies).where(eq(assistantCompanies.userId, id));
+          const u2 = [...new Set(wantedA)];
+          if (u2.length) await tx.insert(assistantCompanies).values(u2.map((companyId2) => ({ userId: id, companyId: companyId2 })));
+        }
+        if (wantedAC) {
+          await tx.delete(assistantCampaigns).where(eq(assistantCampaigns.userId, id));
+          const u3 = [...new Set(wantedAC)];
+          if (u3.length) await tx.insert(assistantCampaigns).values(u3.map((campaignId2) => ({ userId: id, campaignId: campaignId2 })));
+        }
+      }
       if (newRole !== 'psychologist') await tx.delete(psychologistCompanies).where(eq(psychologistCompanies.userId, id));
       else if (wanted) {
         await tx.delete(psychologistCompanies).where(eq(psychologistCompanies.userId, id));
@@ -271,8 +375,4 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true };
   });
 
-  app.get('/admin/audit', { preHandler: app.requireReady('admin') }, async (req) => {
-    const limit = Math.min(Number((req.query as { limit?: string }).limit ?? 100) || 100, 500);
-    return db.select().from(auditLog).orderBy(desc(auditLog.id)).limit(limit);
-  });
 };

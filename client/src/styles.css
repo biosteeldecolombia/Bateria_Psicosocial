@@ -592,3 +592,13 @@ fieldset.item.missing, .opt { border-radius: 14px; }
 .page-hero.compact .hero-title { font-size: clamp(1.15rem, 2.4vw, 1.5rem); }
 .page-hero .lead { margin: 0.45rem 0 0; max-width: 40rem; font-size: 0.95rem; line-height: 1.5; opacity: 0.95; animation: rise 0.8s 0.35s ease-out both; }
 @media (max-width: 40rem) { .page-hero { padding: 1.4rem 1.25rem; } .page-hero.compact { padding: 0.9rem 1.1rem; } }
+
+/* Formato de evaluación ocupacional: resultados a la izquierda y panel de diligenciamiento a la derecha */
+.formato-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 460px); gap: 1.25rem; align-items: start; }
+.formato-panel { position: sticky; top: 0.75rem; max-height: calc(100vh - 1.5rem); overflow: auto; padding: 1rem; border: 1px solid var(--border, rgba(80, 90, 130, 0.25)); border-radius: 12px; background: var(--surface, rgba(255, 255, 255, 0.7)); }
+.formato-panel textarea { resize: vertical; }
+.formato-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; position: sticky; bottom: 0; padding: 0.5rem 0 0; background: inherit; }
+@media (max-width: 900px) { .formato-grid { grid-template-columns: 1fr; } .formato-panel { position: static; max-height: none; } }
+
+/* Menú de tres puntos: fondo opaco (con el vidrio translúcido se veía el contenido de atrás) y por encima de tarjetas y ventanas */
+.menu { background: var(--surface); backdrop-filter: none; z-index: 120; max-width: calc(100vw - 1rem); }

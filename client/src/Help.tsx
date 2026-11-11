@@ -24,7 +24,15 @@ const PSYCHOLOGIST: Topic[] = [
 const ADMIN: Topic[] = [
   { title: 'Qué haces aquí', body: ['Desde las pestañas Empresas, Campañas y Usuarios creas empresas, campañas y cuentas de psicólogas o de empresa cliente (botón «Nueva…»). Las contraseñas las genera el sistema y se muestran una sola vez; si alguien la olvida, la restableces o defines una desde el menú de acciones de su fila.', 'Asigna cada psicóloga a sus empresas: solo verá las asignadas.'] },
   { title: 'Acceso a información clínica', body: ['Por mínimo privilegio, para ver respuestas o resultados debes escribir el motivo (mínimo 10 caracteres). Queda en la auditoría.'] },
-  { title: 'Seguridad', body: ['El administrador y la psicóloga usan verificación en dos pasos (app de autenticación). Guarda los códigos de recuperación en un lugar seguro.'] },
+  { title: 'Seguridad', body: ['El administrador, la psicóloga y el auxiliar administrativo usan verificación en dos pasos (app de autenticación). Guarda los códigos de recuperación en un lugar seguro.', 'Tras varios intentos fallidos una cuenta espera antes de aceptar otro (30 s, 1 min y luego 15 min que se duplican). Puedes desbloquearla desde Usuarios o desde Auditoría.'] },
+  { title: 'Auditoría', body: ['La pestaña «Auditoría» muestra todos los movimientos de todas las cuentas y las alertas de actividad sospechosa (intentos fallidos de ingreso, adivinación de contraseñas, descargas inusuales, ingresos desde una IP nueva o fuera de horario). Filtra por fechas, persona, tipo de movimiento, acción o IP y descarga el resultado en CSV.'] },
+  { title: 'Auxiliar administrativo', body: ['En «Usuarios» crea cuentas de auxiliar y asígnales empresas completas o campañas sueltas (hay «Seleccionar todas»). El auxiliar solo descarga documentos de lo asignado, indicando el motivo, y no ve resultados en pantalla.'] },
+];
+
+const ASSISTANT: Topic[] = [
+  { title: 'Qué puedes hacer', body: ['En «Campañas» ves las empresas o campañas que el administrador te asignó. «Documentos» abre el listado de personas, desde donde descargas el expediente de cada una y sus informes en PDF, o el ZIP con todos los expedientes.', 'No ves resultados en pantalla ni puedes corregir, repetir pruebas ni crear campañas.'] },
+  { title: 'Motivo de cada acceso', body: ['Antes de abrir una campaña debes escribir el motivo (mínimo 10 caracteres), por ejemplo la solicitud de la psicóloga. Queda en la auditoría junto con cada descarga.'] },
+  { title: 'Seguridad', body: ['Tu cuenta usa verificación en dos pasos (app de autenticación). El ZIP de expedientes pide tu contraseña y un código vigente, y se descarga una sola vez.'] },
 ];
 
 const COMPANY: Topic[] = [
@@ -32,7 +40,7 @@ const COMPANY: Topic[] = [
   { title: 'Cómo leer los niveles', body: ['Los niveles van de «sin riesgo» a «riesgo muy alto». La interpretación y las acciones de intervención las define la psicóloga responsable.'] },
 ];
 
-const BY_ROLE: Record<Role, Topic[]> = { collaborator: COLLABORATOR, psychologist: PSYCHOLOGIST, admin: ADMIN, company: COMPANY };
+const BY_ROLE: Record<Role, Topic[]> = { collaborator: COLLABORATOR, psychologist: PSYCHOLOGIST, admin: ADMIN, assistant: ASSISTANT, company: COMPANY };
 
 /** Ayuda contextual por rol. Cierra con Esc; atajo Alt + H. */
 export function Help({ role }: { role: Role }) {

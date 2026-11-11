@@ -22,6 +22,13 @@ export function parseSignature(dataUrl: unknown): { mime: 'image/png' | 'image/j
   return { mime: m[1] as 'image/png' | 'image/jpeg', b64: m[2]! };
 }
 
+/** Imagen de la firma como data URL, o null. */
+export const signatureOfEnc = (decrypt: (v: string) => string, enc: string | null): string | null => {
+  if (!enc) return null;
+  const s = JSON.parse(decrypt(enc)) as { mime: string; b64: string };
+  return `data:${s.mime};base64,${s.b64}`;
+};
+
 /** Perfil profesional de la psicóloga: documento y registro/licencia que salen en el consentimiento de cada expediente. */
 export const profileRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
@@ -33,9 +40,11 @@ export const profileRoutes: FastifyPluginAsync = async (app) => {
       fullName: crypto.decrypt(u.fullNameEnc),
       professionalDocument: u.professionalDocumentEnc ? crypto.decrypt(u.professionalDocumentEnc) : '',
       professionalRegistry: u.professionalRegistryEnc ? crypto.decrypt(u.professionalRegistryEnc) : '',
-      signature: u.signatureEnc ? (() => { const s = JSON.parse(crypto.decrypt(u.signatureEnc)) as { mime: string; b64: string }; return `data:${s.mime};base64,${s.b64}`; })() : null,
+      signature: signatureOfEnc((v) => crypto.decrypt(v), u.signatureEnc),
     };
   });
+
+  app.get('/profile/signature', { preHandler: only }, async (req) => ({ signature: signatureOfEnc((v) => crypto.decrypt(v), req.auth!.user.signatureEnc) }));
 
   /** Carga la imagen de la firma (data URL PNG o JPEG). Reemplaza la anterior. */
   app.put('/profile/signature', { preHandler: only, bodyLimit: 700_000 }, async (req, reply) => {

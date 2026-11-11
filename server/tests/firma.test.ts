@@ -97,6 +97,48 @@ describe('firma de la psicóloga', () => {
     expect((await psyB.call('GET', '/api/profile')).json.signature).toBeNull();
   });
 
+  it('el administrador ve, carga, reemplaza y quita la firma de una psicóloga; ella no puede usar esas rutas', async () => {
+    const png = fakeSignaturePng();
+    expect((await admin.call('GET', `/api/admin/users/${idB}/signature`)).json.signature).toBeNull();
+    expect((await admin.call('PUT', `/api/admin/users/${idB}/signature`, { image: 'hola' })).status).toBe(400);
+    expect((await admin.call('PUT', `/api/admin/users/${idB}/signature`, { image: dataUrl(png) })).status).toBe(200);
+    expect((await admin.call('GET', `/api/admin/users/${idB}/signature`)).json.signature).toBe(dataUrl(png));
+    expect((await psyB.call('GET', '/api/profile/signature')).json.signature).toBe(dataUrl(png)); // la psicóloga la ve en su perfil
+    expect((await psyA.call('GET', `/api/admin/users/${idB}/signature`)).status).toBe(403); // una psicóloga no ve la de otra
+    expect((await psyA.call('PUT', `/api/admin/users/${idB}/signature`, { image: dataUrl(png) })).status).toBe(403);
+    expect((await admin.call('GET', '/api/admin/users/00000000-0000-4000-8000-000000000000/signature')).status).toBe(404);
+    expect((await admin.call('DELETE', `/api/admin/users/${idB}/signature`)).status).toBe(200);
+    expect((await admin.call('GET', `/api/admin/users/${idB}/signature`)).json.signature).toBeNull();
+    const audits = await env.pool.query("SELECT action FROM audit_log WHERE action LIKE 'user.signature%' ORDER BY id");
+    expect(audits.rows.map((r: { action: string }) => r.action)).toEqual(expect.arrayContaining(['user.signature_set_by_admin', 'user.signature_viewed', 'user.signature_removed_by_admin']));
+  });
+
+  it('desde la empresa se asignan las psicólogas responsables (al crearla y al editarla)', async () => {
+    const created = await admin.call('POST', '/api/admin/companies', { name: 'Empresa Asignada', code: 'ASG1', psychologistIds: [idB] });
+    expect(created.status).toBe(201);
+    expect(created.json.minGroupSize).toBe(5); // sin pedirlo en pantalla, queda el valor por defecto
+    const id = created.json.id as string;
+    const mine = async (c: Client) => ((await c.call('GET', '/api/companies')).json as { id: string }[]).map((x) => x.id);
+    expect(await mine(psyB)).toContain(id);
+    expect(await mine(psyA)).not.toContain(id);
+
+    expect((await admin.call('PATCH', `/api/admin/companies/${id}`, { psychologistIds: ['00000000-0000-4000-8000-000000000000'] })).status).toBe(400);
+    expect((await admin.call('PATCH', `/api/admin/companies/${id}`, { name: 'Empresa Asignada 2' })).status).toBe(200); // sin psychologistIds no toca las asignaciones
+    expect(await mine(psyB)).toContain(id);
+
+    const links = await env.pool.query('SELECT user_id FROM psychologist_companies WHERE company_id = $1', [id]);
+    const idA = ((await admin.call('GET', '/api/admin/users')).json as { id: string; username: string }[]).find((u) => u.username === 'fa@sanithelp.test')!.id;
+    expect(links.rows).toHaveLength(1);
+    expect((await admin.call('PATCH', `/api/admin/companies/${id}`, { psychologistIds: [idA] })).status).toBe(200);
+    expect(await mine(psyA)).toContain(id);
+    expect(await mine(psyB)).not.toContain(id); // la lista se reemplaza
+    expect((await admin.call('PATCH', `/api/admin/companies/${id}`, { psychologistIds: [] })).status).toBe(200);
+    expect(await mine(psyA)).not.toContain(id);
+    // Las asignaciones de otras empresas no cambian
+    expect(await mine(psyA)).toContain(companyId);
+    expect((await psyA.call('PATCH', `/api/admin/companies/${id}`, { psychologistIds: [idA] })).status).toBe(403); // solo el administrador
+  });
+
   it('la campaña tiene responsable: quien la crea, o la que elija el administrador', async () => {
     const camp = await psyA.call('POST', '/api/campaigns', { companyId, name: 'Ronda firma', assessments: ['acrofobia'] });
     const id = camp.json.id as string;

@@ -4,6 +4,7 @@ import { loginSchema, mfaCodeSchema, preferencesSchema, MFA_ROLES } from '@sanit
 import { campaigns, users, sessions } from '../db/schema.js';
 import {
   LOCK_MINUTES,
+  lockoutAfter,
   MAX_FAILED_ATTEMPTS,
   audit,
   buildMe,
@@ -56,14 +57,22 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (!user || !user.active || locked || !passwordOk || campaignClosed) {
-      if (user && user.active && !locked) {
+      const ip = req.ip;
+      if (user && user.active && !locked && !campaignClosed) {
         const failed = user.failedAttempts + 1;
-        const lock = failed >= MAX_FAILED_ATTEMPTS;
+        const { waitMs, resetCounter } = lockoutAfter(user.role, failed);
         await db
           .update(users)
-          .set({ failedAttempts: lock ? 0 : failed, lockedUntil: lock ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null })
+          .set({ failedAttempts: resetCounter ? 0 : failed, lockedUntil: waitMs ? new Date(Date.now() + waitMs) : null })
           .where(eq(users.id, user.id));
-        await audit(db, user.id, lock ? 'auth.locked' : 'auth.login_failed');
+        await audit(db, user.id, waitMs >= LOCK_MINUTES * 60_000 ? 'auth.locked' : 'auth.login_failed', undefined, { ip, attempts: failed, waitSeconds: Math.round(waitMs / 1000) });
+      } else if (user && locked) {
+        await audit(db, user.id, 'auth.login_blocked', undefined, { ip }); // intento mientras la cuenta espera
+      } else if (!user) {
+        // Usuario inexistente: no se guarda lo escrito (podría ser una contraseña); solo una huella para agrupar intentos repetidos.
+        await audit(db, null, 'auth.login_failed_unknown', undefined, { ip, ref: crypto.blindIndex(username).slice(0, 12) });
+      } else if (!user.active) {
+        await audit(db, user.id, 'auth.login_inactive', undefined, { ip });
       }
       return reply.code(401).send({ error: GENERIC_LOGIN_ERROR });
     }
@@ -71,7 +80,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     await clearFailures(db, user.id);
     const { token } = await createSession(db, crypto, user); // sesión nueva en cada login (rotación)
     setCookie(reply, token);
-    await audit(db, user.id, 'auth.login');
+    await audit(db, user.id, 'auth.login', undefined, { ip: req.ip });
     const ctx = await loadAuth(db, crypto, token);
     return buildMe(ctx!, crypto);
   });
@@ -141,6 +150,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const { user, session } = req.auth;
     if (!user.mfaEnabled || !user.mfaSecretEnc) return reply.code(409).send({ error: 'La verificación en dos pasos no está activa.' });
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      await audit(db, user.id, 'auth.mfa_blocked', undefined, { ip: req.ip });
+      return reply.code(429).send({ error: `Demasiados intentos. Espera ${Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000))} segundos para volver a intentarlo.` });
+    }
 
     const code = body.data.code.trim();
     const step = checkTotp(crypto.decrypt(user.mfaSecretEnc), crypto.decrypt(user.usernameEnc), code, user.mfaLastStep);
@@ -152,15 +165,16 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       const h = crypto.hashToken(code.toUpperCase());
       if (user.recoveryCodeHashes.includes(h)) {
         await db.update(users).set({ recoveryCodeHashes: user.recoveryCodeHashes.filter((x) => x !== h) }).where(eq(users.id, user.id));
-        await audit(db, user.id, 'auth.recovery_code_used');
+        await audit(db, user.id, 'auth.recovery_code_used', undefined, { ip: req.ip });
         ok = true;
       }
     }
     if (!ok) {
       const failed = user.failedAttempts + 1;
-      const lock = failed >= MAX_FAILED_ATTEMPTS;
-      await db.update(users).set({ failedAttempts: lock ? 0 : failed, lockedUntil: lock ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null }).where(eq(users.id, user.id));
-      await audit(db, user.id, 'auth.mfa_failed');
+      const { waitMs, resetCounter } = lockoutAfter(user.role, failed);
+      const lock = waitMs >= LOCK_MINUTES * 60_000;
+      await db.update(users).set({ failedAttempts: resetCounter ? 0 : failed, lockedUntil: waitMs ? new Date(Date.now() + waitMs) : null }).where(eq(users.id, user.id));
+      await audit(db, user.id, lock ? 'auth.locked' : 'auth.mfa_failed', undefined, { ip: req.ip, attempts: failed, waitSeconds: Math.round(waitMs / 1000) });
       if (lock) {
         await revokeUserSessions(db, user.id);
         reply.clearCookie(cookieName, { path: '/' });
@@ -169,7 +183,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
     await db.update(users).set({ failedAttempts: 0 }).where(eq(users.id, user.id));
     await db.update(sessions).set({ mfaVerified: true }).where(eq(sessions.id, session.id));
-    await audit(db, user.id, 'auth.mfa_verified');
+    await audit(db, user.id, 'auth.mfa_verified', undefined, { ip: req.ip });
     const ctx = await loadAuth(db, crypto, req.cookies[cookieName]);
     return buildMe(ctx!, crypto);
   });

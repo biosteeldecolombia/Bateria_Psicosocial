@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import {
   ACROFOBIA_ANXIETY_SCALE,
@@ -6,8 +8,8 @@ import {
   CLQ_ITEMS,
   CLQ_LEVELS,
   CLQ_SCALE,
-  CONSENT_DATE,
   CONSENT_OCC_BLOCKS,
+  CONSENT_OCC_HEADER,
   CONSENT_OCC_OPTIONS,
   CONSENT_OCC_PROFESSIONAL,
   CONSENT_OCC_TITLE,
@@ -15,6 +17,7 @@ import {
 import { ACRO_BANDS } from '@sanithelp/scoring';
 import type { AcrofobiaRecord, ClqRecord } from '../results/ocupacionales.js';
 import type { ConsentPdfInput } from './consent.js';
+import { TEMPLATES_DIR } from './questionnaires.js';
 import type { Professional } from './expediente.js';
 import { SIGNATURE_BLOCK_H, drawSignatureBlock, drawSignatureIn, embedSignature } from './firma.js';
 
@@ -48,12 +51,12 @@ function wrap(font: PDFFont, text: string, size: number, maxW: number): string[]
 class Writer {
   pg!: PDFPage;
   y = 0;
-  constructor(readonly doc: PDFDocument, readonly font: PDFFont, readonly bold: PDFFont, readonly onPage?: (pg: PDFPage) => void) {
+  constructor(readonly doc: PDFDocument, readonly font: PDFFont, readonly bold: PDFFont, readonly onPage?: (pg: PDFPage) => void, readonly topOffset = 0) {
     this.newPage();
   }
   newPage() {
     this.pg = this.doc.addPage([W, H]);
-    this.y = H - M;
+    this.y = H - M - this.topOffset;
     this.onPage?.(this.pg);
   }
   ensure(h: number) {
@@ -85,28 +88,95 @@ const footer = (pages: PDFPage[], font: PDFFont, professional: Professional, gen
   }
 };
 
+/** Líneas centradas en un recuadro (x, y = esquina inferior izquierda). */
+function centered(page: PDFPage, font: PDFFont, lines: string[], box: { x: number; y: number; w: number; h: number }, size: number) {
+  const lh = size + 2;
+  let y = box.y + box.h / 2 + (lines.length * lh) / 2 - size + 1;
+  for (const l of lines) {
+    const t = safe(l);
+    page.drawText(t, { x: box.x + (box.w - font.widthOfTextAtSize(t, size)) / 2, y, size, font, color: INK });
+    y -= lh;
+  }
+}
+
+/** Encabezado del documento controlado: logo, título y proceso, y la tabla de código, versión, fecha y página (n de N). */
+async function drawOccupationalHeader(doc: PDFDocument, page: PDFPage, font: PDFFont, bold: PDFFont, n: number, total: number): Promise<void> {
+  const x0 = M;
+  const w = W - 2 * M;
+  const h = 62;
+  const y0 = H - 30 - h;
+  const logoW = 92;
+  const rightW = 130;
+  const labelW = 60;
+  const line = { thickness: 0.9, color: INK };
+  page.drawRectangle({ x: x0, y: y0, width: w, height: h, borderColor: INK, borderWidth: 0.9 });
+  page.drawLine({ start: { x: x0 + logoW, y: y0 }, end: { x: x0 + logoW, y: y0 + h }, ...line });
+  const rx = x0 + w - rightW;
+  page.drawLine({ start: { x: rx, y: y0 }, end: { x: rx, y: y0 + h }, ...line });
+  page.drawLine({ start: { x: rx + labelW, y: y0 }, end: { x: rx + labelW, y: y0 + h }, ...line });
+  for (let i = 1; i < 4; i++) page.drawLine({ start: { x: rx, y: y0 + (h * i) / 4 }, end: { x: x0 + w, y: y0 + (h * i) / 4 }, ...line });
+  page.drawLine({ start: { x: x0 + logoW, y: y0 + h / 2 }, end: { x: rx, y: y0 + h / 2 }, ...line });
+  // Logo
+  try {
+    const logo = await doc.embedPng(fs.readFileSync(path.join(TEMPLATES_DIR, 'logo_sanithelp.png')));
+    const k = Math.min((logoW - 16) / logo.width, (h - 14) / logo.height);
+    page.drawImage(logo, { x: x0 + (logoW - logo.width * k) / 2, y: y0 + (h - logo.height * k) / 2, width: logo.width * k, height: logo.height * k });
+  } catch {
+    centered(page, bold, ['SanitHelp'], { x: x0, y: y0, w: logoW, h }, 11);
+  }
+  // Título y proceso
+  const mid = { x: x0 + logoW, w: w - logoW - rightW };
+  centered(page, bold, wrap(bold, CONSENT_OCC_HEADER.title, 9, mid.w - 14), { x: mid.x, y: y0 + h / 2, w: mid.w, h: h / 2 }, 9);
+  centered(page, bold, [CONSENT_OCC_HEADER.process], { x: mid.x, y: y0, w: mid.w, h: h / 2 }, 9);
+  // Código, versión, fecha, página
+  const rows: [string, string][] = [['Código:', CONSENT_OCC_HEADER.code], ['Versión:', CONSENT_OCC_HEADER.version], ['Fecha:', CONSENT_OCC_HEADER.date], ['Página:', `${n} de ${total}`]];
+  rows.forEach(([k, v], i) => {
+    const y = y0 + h - (h * (i + 1)) / 4;
+    page.drawText(k, { x: rx + 4, y: y + 5, size: 8.5, font: bold, color: INK });
+    page.drawText(safe(v), { x: rx + labelW + 5, y: y + 5, size: 8.5, font, color: INK });
+  });
+}
+
 /**
  * Consentimiento de evaluación psicológica ocupacional con los datos de la persona, su decisión y la constancia electrónica.
- * Se redacta con el texto que la persona vio en pantalla (el documento no tiene plantilla escaneada como el de la batería).
+ * Se redacta con el texto que la persona vio en pantalla (el documento no tiene plantilla escaneada como el de la batería);
+ * lleva el mismo encabezado del documento controlado en cada página.
  */
 export async function occupationalConsentInto(doc: PDFDocument, inp: ConsentPdfInput & { company: string }): Promise<void> {
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const w = new Writer(doc, font, bold, (pg) => {
-    pg.drawText(safe(`${CONSENT_OCC_TITLE}`), { x: M, y: H - 28, size: 8, font: bold, color: MUTED });
-    pg.drawText(safe(`FP-PS-CI · Versión 01 · ${CONSENT_DATE} · Proceso: Prestación de servicios`), { x: M, y: H - 38, size: 7, font, color: MUTED });
-  });
-  w.y -= 14;
-  w.para(CONSENT_OCC_TITLE, 13, bold, M, 8);
-  w.line(`Fecha de diligenciamiento: ${dmy(inp.decidedAt)}`, M, 10, bold);
-  w.gap(16);
-  w.line('DATOS DE IDENTIFICACIÓN DEL PACIENTE', M, 10, bold);
-  w.gap(14);
-  w.line(`Nombres: ${inp.names}`);
-  w.line(`Apellidos: ${inp.surnames}`, 300);
-  w.gap(14);
-  w.line(`N.° de identificación: ${inp.document}`);
-  w.gap(20);
+  const firstPage = doc.getPageCount();
+  const w = new Writer(doc, font, bold, undefined, 66);
+  w.y -= 4;
+  // Fecha de diligenciamiento (AAAA MM DD) a la derecha, como en el formato
+  const d = inp.decidedAt;
+  const lbl = 'FECHA DE DILIGENCIAMIENTO';
+  w.pg.drawText(lbl, { x: W - M - bold.widthOfTextAtSize(lbl, 10.5), y: w.y, size: 10.5, font: bold, color: INK });
+  w.gap(24);
+  const boxes: [string, number][] = [[String(d.getFullYear()), 46], [pad(d.getMonth() + 1), 34], [pad(d.getDate()), 34]];
+  let bx = W - M - boxes.reduce((a, [, bw]) => a + bw, 0) - 12;
+  for (const [t, bw] of boxes) {
+    w.pg.drawRectangle({ x: bx, y: w.y - 4, width: bw, height: 18, borderColor: INK, borderWidth: 0.9 });
+    w.pg.drawText(t, { x: bx + (bw - font.widthOfTextAtSize(t, 10)) / 2, y: w.y + 1, size: 10, font, color: INK });
+    bx += bw + 6;
+  }
+  w.gap(28);
+  const title = 'DATOS DE IDENTIFICACIÓN DEL PACIENTE';
+  const tw = bold.widthOfTextAtSize(title, 11);
+  w.pg.drawText(title, { x: (W - tw) / 2, y: w.y, size: 11, font: bold, color: INK });
+  w.pg.drawLine({ start: { x: (W - tw) / 2, y: w.y - 2 }, end: { x: (W + tw) / 2, y: w.y - 2 }, thickness: 0.8, color: INK });
+  w.gap(24);
+  const field = (label: string, value: string, x: number, wide: number) => {
+    w.pg.drawText(label, { x, y: w.y, size: 10.5, font: bold, color: INK });
+    const lx = x + bold.widthOfTextAtSize(label, 10.5) + 4;
+    w.pg.drawLine({ start: { x: lx, y: w.y - 2 }, end: { x: lx + wide, y: w.y - 2 }, thickness: 0.6, color: INK });
+    w.pg.drawText(safe(value), { x: lx + 2, y: w.y + 1, size: 10, font, color: INK });
+  };
+  field('Nombres:', inp.names, M, 165);
+  field('Apellidos:', inp.surnames, 290, 160);
+  w.gap(24);
+  field('N° de Identificación:', inp.document, M, 150);
+  w.gap(24);
   for (const b of CONSENT_OCC_BLOCKS) {
     const text = b.text.replace('{empresa}', inp.company || '________________');
     if (b.kind === 'h') {
@@ -158,6 +228,8 @@ export async function occupationalConsentInto(doc: PDFDocument, inp: ConsentPdfI
   w.line(`N.° identificación: ${pr?.document ?? '________________________'}`, M, 10);
   w.gap(13);
   w.line(`Registro profesional: ${pr?.registry ?? '________________________'}`, M, 10);
+  const mine = doc.getPages().slice(firstPage);
+  for (let i = 0; i < mine.length; i++) await drawOccupationalHeader(doc, mine[i]!, font, bold, i + 1, mine.length);
 }
 
 const level = (l: string) => l;

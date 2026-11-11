@@ -127,7 +127,7 @@ describe('PDF de respuestas', () => {
 
     const log = await admin.call('GET', '/api/admin/audit?limit=500');
     for (const a of ['pdf.individual', 'pdf.bulk_requested', 'pdf.bulk_ready', 'pdf.bulk_downloaded', 'pdf.bulk_denied']) {
-      expect(log.json.some((e: { action: string }) => e.action === a), a).toBe(true);
+      expect(log.json.rows.some((e: { action: string }) => e.action === a), a).toBe(true);
     }
   });
 

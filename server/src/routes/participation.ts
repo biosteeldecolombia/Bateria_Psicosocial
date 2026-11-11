@@ -83,7 +83,7 @@ export const participationRoutes: FastifyPluginAsync = async (app) => {
         .update(participants)
         .set({ resumeFailedAttempts: lock ? 0 : failed, resumeLockedUntil: lock ? new Date(Date.now() + RESUME_LOCK_MINUTES * 60_000) : null })
         .where(eq(participants.id, p.id));
-      await audit(db, user.id, lock ? 'participant.resume_locked' : 'participant.resume_failed', { type: 'participant', id: p.id });
+      await audit(db, user.id, lock ? 'participant.resume_locked' : 'participant.resume_failed', { type: 'participant', id: p.id }, { ip: req.ip });
       return reply.code(401).send({ error: GENERIC });
     }
     await db.update(participants).set({ resumeFailedAttempts: 0, resumeLockedUntil: null }).where(eq(participants.id, p.id));

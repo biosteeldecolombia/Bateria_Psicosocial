@@ -10,7 +10,7 @@ import { CompanyHome } from './analysis/CompanyHome';
 import { Icon } from './icons';
 import { Backdrop, LogoFull, PRODUCT_NAME, Splash } from './BrandLoader';
 
-const ROLE_LABEL: Record<string, string> = { admin: 'Administrador', psychologist: 'Psicóloga', collaborator: 'Colaborador', company: 'Empresa cliente' };
+const ROLE_LABEL: Record<string, string> = { admin: 'Administrador', psychologist: 'Psicóloga', assistant: 'Auxiliar administrativo', collaborator: 'Colaborador', company: 'Empresa cliente' };
 
 function Shell({ me, onLogout, wide, children }: { me: MeResponse | null; onLogout?: () => void; wide?: boolean; children: ReactNode }) {
   const mainRef = useRef<HTMLElement>(null);
@@ -241,11 +241,11 @@ function Inner() {
   else if (me.status === 'mfa_setup') body = <MfaSetup onMe={refresh} />;
   else if (me.status === 'mfa_required') body = <MfaVerify onMe={accept} />;
   else if (me.role === 'collaborator') body = <><Participation me={me} onMe={accept} /><Footer me={me} onLogoutAll={logoutAll} /></>;
-  else if (me.role === 'admin' || me.role === 'psychologist') body = <><Management me={me} /><Footer me={me} onLogoutAll={logoutAll} /></>;
+  else if (me.role === 'admin' || me.role === 'psychologist' || me.role === 'assistant') body = <><Management me={me} /><Footer me={me} onLogoutAll={logoutAll} /></>;
   else body = <><CompanyHome me={me} /><Footer me={me} onLogoutAll={logoutAll} /></>;
 
   return (
-    <Shell me={me} onLogout={me ? logout : undefined} wide={!!me && me.status === 'ready' && (me.role === 'admin' || me.role === 'psychologist')}>
+    <Shell me={me} onLogout={me ? logout : undefined} wide={!!me && me.status === 'ready' && (me.role === 'admin' || me.role === 'psychologist' || me.role === 'assistant')}>
       {body}
       {me && <SessionWarning me={me} onExtend={extend} onExpired={expired} />}
     </Shell>

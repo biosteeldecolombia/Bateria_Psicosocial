@@ -7,7 +7,7 @@ import { bigserial, boolean, index, integer, jsonb, pgEnum, pgTable, primaryKey,
  *  - collaborator: credencial COMPARTIDA de una campaña (empresa + ronda). Los colaboradores no tienen usuario propio;
  *    se identifican dentro del formulario (documento y nombre) y retoman con un código personal.
  */
-export const roleEnum = pgEnum('role', ['admin', 'psychologist', 'collaborator', 'company']);
+export const roleEnum = pgEnum('role', ['admin', 'psychologist', 'collaborator', 'company', 'assistant']);
 export const formEnum = pgEnum('form_type', ['A', 'B']);
 export const campaignStatusEnum = pgEnum('campaign_status', ['open', 'closed']);
 export const participantStatusEnum = pgEnum('participant_status', ['in_progress', 'completed', 'declined', 'revoked']);
@@ -77,6 +77,26 @@ export const psychologistCompanies = pgTable(
     companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.userId, t.companyId] })],
+);
+
+/** Empresas completas cuyos documentos puede descargar un Auxiliar administrativo (rol `assistant`). */
+export const assistantCompanies = pgTable(
+  'assistant_companies',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    companyId: uuid('company_id').notNull().references(() => companies.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.companyId] })],
+);
+
+/** Campañas sueltas cuyos documentos puede descargar un Auxiliar administrativo. */
+export const assistantCampaigns = pgTable(
+  'assistant_campaigns',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    campaignId: uuid('campaign_id').notNull().references(() => campaigns.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.campaignId] })],
 );
 
 /** Una persona que responde dentro de una campaña. Se crea cuando se identifica en el formulario. */

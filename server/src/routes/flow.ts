@@ -164,7 +164,7 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
       date: CONSENT_DATE,
       hash: text.hash,
       addenda: text.addenda,
-      docs: text.docs.map((d) => ({ id: d.id, title: d.title, blocks: d.blocks })),
+      docs: text.docs.map((d) => ({ id: d.id, title: d.title, blocks: d.blocks, header: d.header ?? null })),
       options: text.options,
       company: co?.name ?? '',
       fullName: nameParts(crypto, p).full,

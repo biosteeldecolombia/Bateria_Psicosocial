@@ -22,6 +22,23 @@ export const ABSOLUTE_SESSION_HOURS = 12;
 export const MAX_FAILED_ATTEMPTS = 5;
 export const LOCK_MINUTES = 15;
 
+/**
+ * Espera tras el intento fallido número `failed` de una cuenta.
+ *  - Personal (admin, psicóloga, auxiliar, empresa): el 3.º espera 30 s, el 4.º 1 min y desde el 5.º se bloquea 15 min, que se
+ *    duplican con cada intento fallido más (máximo 24 h). El contador sigue hasta un ingreso correcto o hasta que el
+ *    administrador desbloquee la cuenta.
+ *  - Credencial compartida de campaña: 5 intentos → 15 min y el contador vuelve a cero (sin escalar: un tercero no debe poder
+ *    dejar sin acceso a toda la campaña por horas o días).
+ */
+export function lockoutAfter(role: string, failed: number): { waitMs: number; resetCounter: boolean } {
+  const lockMs = LOCK_MINUTES * 60_000;
+  if (role === 'collaborator') return failed >= MAX_FAILED_ATTEMPTS ? { waitMs: lockMs, resetCounter: true } : { waitMs: 0, resetCounter: false };
+  if (failed < 3) return { waitMs: 0, resetCounter: false };
+  if (failed === 3) return { waitMs: 30_000, resetCounter: false };
+  if (failed === 4) return { waitMs: 60_000, resetCounter: false };
+  return { waitMs: Math.min(lockMs * 2 ** (failed - MAX_FAILED_ATTEMPTS), 24 * 3600_000), resetCounter: false };
+}
+
 export function computeStatus(user: UserRow, session: SessionRow): AuthStatus {
   if (MFA_ROLES.includes(user.role)) {
     if (!user.mfaEnabled) return 'mfa_setup';

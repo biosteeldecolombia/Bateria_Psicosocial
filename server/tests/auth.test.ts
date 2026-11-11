@@ -261,8 +261,9 @@ describe('datos y auditoría', () => {
 
   it('la auditoría registra eventos sin datos personales y no se puede modificar ni borrar', async () => {
     const log = await admin.call('GET', '/api/admin/audit?limit=500');
-    expect(log.json.some((e: { action: string }) => e.action === 'participant.started')).toBe(true);
-    const dump = JSON.stringify(log.json);
+    expect(log.json.rows.some((e: { action: string }) => e.action === 'participant.started')).toBe(true);
+    // Lo que se guarda no lleva datos personales (la vista del administrador sí muestra el nombre de la cuenta que actuó).
+    const dump = JSON.stringify((await env.pool.query('SELECT * FROM audit_log')).rows);
     expect(dump).not.toContain(ADMIN_EMAIL);
     expect(dump).not.toContain('Ana Pérez');
     await expect(env.pool.query('UPDATE audit_log SET action = $1', ['x'])).rejects.toThrow(/solo inserción/);

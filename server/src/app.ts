@@ -13,6 +13,7 @@ import { createCrypto, type Crypto } from './security/crypto.js';
 import { hashPassword } from './security/passwords.js';
 import { authRoutes } from './routes/auth.js';
 import { adminRoutes } from './routes/admin.js';
+import { auditRoutes } from './routes/audit.js';
 import { campaignRoutes } from './routes/campaigns.js';
 import { participationRoutes } from './routes/participation.js';
 import { flowRoutes } from './routes/flow.js';
@@ -118,6 +119,7 @@ export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
   app.get('/api/health', { config: { rateLimit: false } }, async () => ({ status: 'ok' }));
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(adminRoutes, { prefix: '/api' });
+  await app.register(auditRoutes, { prefix: '/api' });
   await app.register(campaignRoutes, { prefix: '/api' });
   await app.register(participationRoutes, { prefix: '/api/participation' });
   await app.register(flowRoutes, { prefix: '/api/participation' });

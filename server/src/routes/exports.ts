@@ -16,6 +16,9 @@ import { buildValantiReport } from '../pdf/valanti.js';
 import { loadValanti } from '../results/valanti.js';
 import { loadAcrofobia, loadClq } from '../results/ocupacionales.js';
 import { buildAcrofobiaReport, buildClqReport } from '../pdf/ocupacionales.js';
+import { buildFormatoPdf } from '../pdf/formatos.js';
+import { loadFormatoContext } from '../results/formatos.js';
+import { FORMATOS, FORMATO_KINDS, type FormatoKind } from '@sanithelp/shared';
 import { buildPf16Sheet } from '../pdf/pf16.js';
 import { loadIndividual } from '../results/individual.js';
 
@@ -31,7 +34,8 @@ const slug = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/
  */
 export const exportRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
-  const staff = app.requireReady('admin', 'psychologist');
+  // Documentos y expedientes: administrador, psicóloga y auxiliar administrativo (este último, solo de lo que se le asignó y con motivo).
+  const staff = app.requireReady('admin', 'psychologist', 'assistant');
   fs.mkdirSync(EXPORT_DIR, { recursive: true });
 
   /**
@@ -145,6 +149,30 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     return reply
       .header('Content-Type', 'application/pdf')
       .header('Content-Disposition', `attachment; filename="Acrofobia_${rec.document}.pdf"`)
+      .send(Buffer.from(bytes));
+  });
+
+  /**
+   * Formato de evaluación psicológica ocupacional (alturas / espacios confinados) ya diligenciado por la psicóloga,
+   * con el encabezado del formato y la firma de la psicóloga responsable de la campaña.
+   */
+  app.get('/participants/:id/formatos/:kind/pdf', { preHandler: staff }, async (req, reply) => {
+    const { id, kind } = req.params as { id: string; kind: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p || !(FORMATO_KINDS as readonly string[]).includes(kind)) return reply.code(404).send({ error: 'Participante o formato no encontrado' });
+    const k = kind as FormatoKind;
+    const c = await clinicalAccess(db, req, reply, p.campaignId);
+    if (!c) return;
+    if (!c.assessments.includes(FORMATOS[k].assessment)) return reply.code(404).send({ error: 'Esta campaña no aplica ese formato.' });
+    const ctx = await loadFormatoContext(db, crypto, p, k);
+    if (!ctx.record) return reply.code(404).send({ error: 'Esta persona aún no completa el cuestionario.' });
+    if (!ctx.saved) return reply.code(409).send({ error: 'Guarda primero el formato para descargarlo.' });
+    const clq = k === 'confinados' ? { total: (ctx.record as { result: { total: number } }).result.total, level: (ctx.record as { level: 'low' | 'moderate' | 'high' | null }).level } : undefined;
+    const bytes = await buildFormatoPdf({ kind: k, data: ctx.saved.data, prefill: ctx.prefill, clq, professional: await professionalFor(req.auth!.user, c) });
+    await audit(db, req.auth!.user.id, 'pdf.formato', { type: 'participant', id }, { kind: k });
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="Formato_${k}_${ctx.person.document}.pdf"`)
       .send(Buffer.from(bytes));
   });
 

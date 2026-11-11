@@ -4,6 +4,8 @@ import { BulkExport, downloadFile } from './BulkExport';
 import { Icon, type IconName } from '../icons';
 import { DISC_PATTERN_LABELS, ReportRow, ScoreBar } from './Reports';
 import { Loading } from '../BrandLoader';
+import { FormatoView } from './Formato';
+import { RowMenu } from '../ui';
 
 /** Niveles con color Y texto Y símbolo (nunca solo color). */
 const LEVEL_ICON: IconName[] = ['check', 'circle', 'half', 'triangle', 'octagon'];
@@ -65,15 +67,16 @@ const TABS: [Tab, string][] = [
   ['claustrofobia', 'Claustrofobia'],
 ];
 
-export function Analysis({ campaignId, campaignName, assessments, isAdmin, onClose }: { campaignId: string; campaignName: string; assessments: string[]; isAdmin: boolean; onClose: () => void }) {
+/** `isAdmin`: debe escribir el motivo del acceso (administrador y auxiliar). `limited`: auxiliar administrativo, solo listado y descargas. */
+export function Analysis({ campaignId, campaignName, assessments, isAdmin, limited = false, onClose }: { campaignId: string; campaignName: string; assessments: string[]; isAdmin: boolean; limited?: boolean; onClose: () => void }) {
   const hasPsy = assessments.includes('psychosocial');
   const hasDisc = assessments.includes('disc');
   const hasValanti = assessments.includes('valanti');
   const hasPf16 = assessments.includes('pf16');
   const hasAcro = assessments.includes('acrofobia');
   const hasClq = assessments.includes('claustrofobia');
-  const tabs = TABS.filter(([k]) => (k === 'disc' ? hasDisc : k === 'valanti' ? hasValanti : k === 'pf16' ? hasPf16 : k === 'acrofobia' ? hasAcro : k === 'claustrofobia' ? hasClq : k === 'participants' || hasPsy));
-  const [tab, setTab] = useState<Tab>(hasPsy ? 'summary' : 'participants');
+  const tabs = TABS.filter(([k]) => limited ? k === 'participants' : (k === 'disc' ? hasDisc : k === 'valanti' ? hasValanti : k === 'pf16' ? hasPf16 : k === 'acrofobia' ? hasAcro : k === 'claustrofobia' ? hasClq : k === 'participants' || hasPsy));
+  const [tab, setTab] = useState<Tab>(hasPsy && !limited ? 'summary' : 'participants');
   const [reason, setReason] = useState('');
   const [reasonOk, setReasonOk] = useState(!isAdmin);
 
@@ -112,7 +115,7 @@ export function Analysis({ campaignId, campaignName, assessments, isAdmin, onClo
             ))}
           </div>
           <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} tabIndex={0}>
-            {tab === 'participants' && <Participants campaignId={campaignId} qs={q} reason={reason} />}
+            {tab === 'participants' && <Participants campaignId={campaignId} qs={q} reason={reason} hasPsy={hasPsy} limited={limited} assessments={assessments} />}
             {tab === 'summary' && <SummaryView campaignId={campaignId} qs={q} />}
             {tab === 'group' && <GroupView campaignId={campaignId} qs={q} kind="summary" />}
             {tab === 'domains' && <GroupView campaignId={campaignId} qs={q} kind="domains" />}
@@ -295,11 +298,13 @@ function FormSwitch({ person, onClose, onDone }: { person: Participant; onClose:
   );
 }
 
-function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?: string) => string; reason: string }) {
+/** `hasPsy`: la forma A/B solo existe en la batería psicosocial; sin ella no se muestra. */
+function Participants({ campaignId, qs, reason, hasPsy, limited, assessments }: { campaignId: string; qs: (e?: string) => string; reason: string; hasPsy: boolean; limited: boolean; assessments: string[] }) {
   const [tick, setTick] = useState(0);
   const [bulk, setBulk] = useState(false);
   const [pdfErr, setPdfErr] = useState('');
-  const areas = useLoad<{ values: { value: string; people: number }[] }>(`/api/campaigns/${campaignId}/groups${qs('field=Dpto%2FArea%2FSecc')}`);
+  // El auxiliar no consulta los grupos de resultados (el filtro por área del ZIP queda sin opciones).
+  const areas = useLoad<{ values: { value: string; people: number }[] }>(limited ? null : `/api/campaigns/${campaignId}/groups${qs('field=Dpto%2FArea%2FSecc')}`);
   const { data, error, loading } = useLoad<Participant[]>(`/api/campaigns/${campaignId}/participants?t=${tick}`);
   const [code, setCode] = useState<{ name: string; code: string } | null>(null);
   const [rights, setRights] = useState<{ person: Participant; mode: 'edit' | 'erase' } | null>(null);
@@ -339,7 +344,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
         <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
           <table className="table">
             <caption className="sr-only">Participantes de la campaña</caption>
-            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Estado</th><th scope="col">Consentimiento</th><th scope="col">Forma</th><th scope="col">Avance</th><th scope="col">Acción</th></tr></thead>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Estado</th><th scope="col">Consentimiento</th>{hasPsy && !limited && <th scope="col">Forma</th>}<th scope="col">Avance</th><th scope="col">Acción</th></tr></thead>
             <tbody>
               {rows.map((p) => (
                 <tr key={p.id}>
@@ -347,6 +352,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                   <td>{p.fullName}</td>
                   <td>{STATUS[p.status] ?? p.status}</td>
                   <td>{p.consent ? CONSENT[p.consent] : 'Pendiente'}</td>
+                  {hasPsy && !limited && (
                   <td>
                     {p.form ? (
                       <div role="group" aria-label={`Forma de ${p.fullName}`} style={{ display: 'inline-flex', gap: 2 }}>
@@ -357,15 +363,35 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                     ) : '—'}
                     {p.formManual && <div className="muted">manual</div>}
                   </td>
+                  )}
                   <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés', p.progress.disc && 'DISC', p.progress.discOutdated && 'DISC (por repetir)', p.progress.valanti && 'VALANTI', p.progress.pf16 && '16PF', p.progress.acrofobia && 'Acrofobia', p.progress.claustrofobia && 'CLQ'].filter(Boolean).join(' · ') || '—'}</td>
                   <td>
                     {p.consent && (
                       <button className="btn secondary" onClick={async () => { setPdfErr(''); try { await downloadFile(`/api/participants/${p.id}/expediente.pdf${qs()}`, `Expediente_${p.document}.pdf`); } catch (e) { setPdfErr((e as Error).message); } }}>PDF</button>
                     )}{' '}
-                    {p.status === 'in_progress' && (
+                    {limited && p.status === 'completed' && (() => {
+                      // Informes en PDF de las pruebas que la persona respondió (el auxiliar descarga, no ve resultados)
+                      const docs: { label: string; path: string; name: string }[] = [];
+                      const add = (ok: boolean, label: string, path: string, name: string) => { if (ok) docs.push({ label, path, name }); };
+                      add(assessments.includes('disc') && !!p.progress.disc, 'Informe DISC', 'disc.pdf', `DISC_${p.document}.pdf`);
+                      add(assessments.includes('valanti') && !!p.progress.valanti, 'Informe VALANTI', 'valanti.pdf', `VALANTI_${p.document}.pdf`);
+                      add(assessments.includes('pf16') && !!p.progress.pf16, 'Hoja de respuestas 16PF', 'pf16.pdf', `16PF_${p.document}.pdf`);
+                      add(assessments.includes('acrofobia') && !!p.progress.acrofobia, 'Informe de Acrofobia', 'acrofobia.pdf', `Acrofobia_${p.document}.pdf`);
+                      add(assessments.includes('acrofobia') && !!p.progress.acrofobia, 'Formato · Trabajo en alturas', 'formatos/alturas/pdf', `Formato_alturas_${p.document}.pdf`);
+                      add(assessments.includes('claustrofobia') && !!p.progress.claustrofobia, 'Informe CLQ', 'claustrofobia.pdf', `CLQ_${p.document}.pdf`);
+                      add(assessments.includes('claustrofobia') && !!p.progress.claustrofobia, 'Formato · Espacios confinados', 'formatos/confinados/pdf', `Formato_confinados_${p.document}.pdf`);
+                      if (!docs.length) return null;
+                      return (
+                        <RowMenu
+                          label={`Informes en PDF de ${p.fullName}`}
+                          items={docs.map((d) => ({ label: d.label, icon: 'folder' as const, onSelect: async () => { setPdfErr(''); try { await downloadFile(`/api/participants/${p.id}/${d.path}${qs()}`, d.name); } catch (e) { setPdfErr((e as Error).message); } } }))}
+                        />
+                      );
+                    })()}
+                    {!limited && p.status === 'in_progress' && (
                       <button className="btn secondary" onClick={async () => { const r = await api<{ resumeCode: string }>('POST', `/api/participants/${p.id}/reset-code`); setCode({ name: p.fullName, code: r.resumeCode }); setTick((t) => t + 1); }}>Nuevo código</button>
                     )}{' '}
-                    {p.status !== 'revoked' && (
+                    {!limited && p.status !== 'revoked' && (
                       <>
                         {p.consent === 'authorized' && repeatOptions(p).length > 0 && <><button className="btn secondary" onClick={() => { setRights(null); setFormFor(null); setRepeat(p); }}>Repetir prueba</button>{' '}</>}
                         <button className="btn secondary" onClick={() => { setRepeat(null); setFormFor(null); setRights({ person: p, mode: 'edit' }); }}>Corregir</button>{' '}
@@ -596,6 +622,8 @@ interface AcroPerson {
 function AcrofobiaView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ people: AcroPerson[] }>(`/api/campaigns/${campaignId}/acrofobia${qs()}`);
   const [dlErr, setDlErr] = useState('');
+  const [formato, setFormato] = useState<string | null>(null);
+  if (formato) return <FormatoView kind="alturas" participantId={formato} qs={qs} onBack={() => setFormato(null)} />;
   if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const people = data?.people ?? [];
@@ -619,7 +647,7 @@ function AcrofobiaView({ campaignId, qs }: { campaignId: string; qs: (e?: string
                     <td><strong>{p.avoidance.total}</strong> · {p.avoidance.level}</td>
                     <td>{fmtDate(p.date)}</td>
                   </>}
-                  actions={<PdfButton url={`/api/participants/${p.participantId}/acrofobia.pdf${qs()}`} name={`Acrofobia_${p.person.document}.pdf`} label="Informe PDF" onError={setDlErr} />}
+                  actions={<><button className="btn" onClick={() => setFormato(p.participantId)}>Formato de evaluación</button> <PdfButton url={`/api/participants/${p.participantId}/acrofobia.pdf${qs()}`} name={`Acrofobia_${p.person.document}.pdf`} label="Informe PDF" onError={setDlErr} /></>}
                 >
                   <h3>Acrofobia de Cohen · {p.person.fullName}</h3>
                   <p className="muted">Aplicado el {fmtDate(p.date)}. Ansiedad: {p.anxiety.answered} de 20 respondidas; evitación: {p.avoidance.answered} de 20.</p>
@@ -650,7 +678,7 @@ interface ClqPerson {
 }
 
 /** Una fila del CLQ: la psicóloga marca la interpretación y, ya guardada, se habilita el PDF. */
-function ClqRow({ p, qs, onSaved, onError }: { p: ClqPerson; qs: (e?: string) => string; onSaved: () => void; onError: (m: string) => void }) {
+function ClqRow({ p, qs, onSaved, onError, onFormato }: { p: ClqPerson; qs: (e?: string) => string; onSaved: () => void; onError: (m: string) => void; onFormato: () => void }) {
   const [level, setLevel] = useState(p.level ?? '');
   const [busy, setBusy] = useState(false);
   const dirty = level !== (p.level ?? '');
@@ -680,6 +708,7 @@ function ClqRow({ p, qs, onSaved, onError }: { p: ClqPerson; qs: (e?: string) =>
       </td>
       <td>{p.markedAt ? `Marcada el ${fmtDate(p.markedAt)}` : 'Pendiente'}</td>
       <td className="actions">
+        <button className="btn" onClick={onFormato}>Formato de evaluación</button>{' '}
         <button className="btn" disabled={busy || !level || !dirty} onClick={() => void save()}>{busy ? 'Guardando…' : 'Guardar interpretación'}</button>{' '}
         {p.level && !dirty ? <PdfButton url={`/api/participants/${p.participantId}/claustrofobia.pdf${qs()}`} name={`CLQ_${p.person.document}.pdf`} label="Descargar PDF" onError={onError} /> : <button className="btn secondary" disabled title="Guarda primero la interpretación">Descargar PDF</button>}
       </td>
@@ -692,6 +721,8 @@ function ClaustrofobiaView({ campaignId, qs }: { campaignId: string; qs: (e?: st
   const [tick, setTick] = useState(0);
   const { data, error, loading } = useLoad<{ people: ClqPerson[] }>(`/api/campaigns/${campaignId}/claustrofobia${qs(`t=${tick}`)}`);
   const [dlErr, setDlErr] = useState('');
+  const [formato, setFormato] = useState<string | null>(null);
+  if (formato) return <FormatoView kind="confinados" participantId={formato} qs={qs} onBack={() => { setFormato(null); setTick((t) => t + 1); }} />;
   if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
   const people = data?.people ?? [];
@@ -705,7 +736,7 @@ function ClaustrofobiaView({ campaignId, qs }: { campaignId: string; qs: (e?: st
             <caption className="sr-only">CLQ de Claustrofobia por persona</caption>
             <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Puntaje total</th><th scope="col">Interpretación</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
             <tbody>
-              {people.map((p) => <ClqRow key={`${p.participantId}-${p.level}`} p={p} qs={qs} onSaved={() => setTick((t) => t + 1)} onError={setDlErr} />)}
+              {people.map((p) => <ClqRow key={`${p.participantId}-${p.level}`} p={p} qs={qs} onSaved={() => setTick((t) => t + 1)} onError={setDlErr} onFormato={() => setFormato(p.participantId)} />)}
             </tbody>
           </table>
         </div>

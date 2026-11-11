@@ -1,6 +1,21 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { ApiError } from './api';
 import { Icon, type IconName } from './icons';
+
+/** Casilla maestra «Seleccionar todas»: marca o desmarca todo el grupo y queda a medias cuando hay solo algunas marcadas. */
+export function SelectAll({ total, selected, onChange, label = 'Seleccionar todas' }: { total: number; selected: number; onChange: (all: boolean) => void; label?: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = selected > 0 && selected < total;
+  }, [selected, total]);
+  if (total < 2) return null;
+  return (
+    <label className="check" style={{ fontWeight: 700, marginBottom: '0.5rem' }}>
+      <input ref={ref} type="checkbox" checked={selected === total} onChange={(e) => onChange(e.target.checked)} /> {label} <span className="muted" style={{ fontWeight: 400 }}>({selected} de {total})</span>
+    </label>
+  );
+}
 
 /** Ejecuta una acción asíncrona mostrando error y estado de ocupado. */
 export function useAction() {
@@ -104,11 +119,17 @@ export interface MenuItem { label: string; icon: IconName; onSelect: () => void;
 
 /** Menú desplegable de acciones de una fila. */
 export function RowMenu({ label, items }: { label: string; items: MenuItem[] }) {
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  // `anchor`: rectángulo del botón de tres puntos al abrir. `place`: posición final del menú, ya ajustada a la ventana.
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const [place, setPlace] = useState<{ top: number; left: number } | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
-  const close = useCallback(() => setPos(null), []);
+  const menu = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => {
+    setAnchor(null);
+    setPlace(null);
+  }, []);
   useEffect(() => {
-    if (!pos) return;
+    if (!anchor) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       if (!btn.current?.contains(t) && !(t as HTMLElement).closest?.('.menu')) close();
@@ -124,7 +145,18 @@ export function RowMenu({ label, items }: { label: string; items: MenuItem[] }) 
       window.removeEventListener('scroll', close, true);
       window.removeEventListener('resize', close);
     };
-  }, [pos, close]);
+  }, [anchor, close]);
+  // Se mide el menú ya dibujado (invisible) y se ubica pegado al botón: debajo si cabe y, si no, encima; sin salirse por los lados.
+  useLayoutEffect(() => {
+    if (!anchor || !menu.current) return;
+    const { width, height } = menu.current.getBoundingClientRect();
+    const gap = 6;
+    const edge = 8;
+    const below = anchor.bottom + gap;
+    const top = below + height <= window.innerHeight - edge ? below : Math.max(edge, anchor.top - gap - height);
+    const left = Math.min(Math.max(edge, anchor.right - width), window.innerWidth - width - edge);
+    setPlace({ top, left });
+  }, [anchor]);
   return (
     <>
       <button
@@ -132,23 +164,23 @@ export function RowMenu({ label, items }: { label: string; items: MenuItem[] }) 
         className="icon-btn"
         aria-label={label}
         aria-haspopup="menu"
-        aria-expanded={!!pos}
-        onClick={() => {
-          const r = btn.current!.getBoundingClientRect();
-          setPos(pos ? null : { top: r.bottom + 4, right: window.innerWidth - r.right });
-        }}
+        aria-expanded={!!anchor}
+        onClick={() => (anchor ? close() : setAnchor(btn.current!.getBoundingClientRect()))}
       >
         <Icon name="more" />
       </button>
-      {pos && (
-        <div className="menu" role="menu" style={{ top: pos.top, right: pos.right }}>
-          {items.map((it) => (
-            <button key={it.label} role="menuitem" className={`menu-item${it.danger ? ' danger' : ''}`} disabled={it.disabled} onClick={() => { close(); it.onSelect(); }}>
-              <Icon name={it.icon} /> {it.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {anchor &&
+        // En el <body>: dentro de una tarjeta con efecto de vidrio (backdrop-filter) un menú «fixed» se ubicaría respecto a la tarjeta.
+        createPortal(
+          <div ref={menu} className="menu" role="menu" style={{ top: place?.top ?? 0, left: place?.left ?? 0, visibility: place ? 'visible' : 'hidden' }}>
+            {items.map((it) => (
+              <button key={it.label} role="menuitem" className={`menu-item${it.danger ? ' danger' : ''}`} disabled={it.disabled} onClick={() => { close(); it.onSelect(); }}>
+                <Icon name={it.icon} /> {it.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } 
 import { ASSESSMENTS, ASSESSMENT_IDS, consentDocsFor, consentVersionLabel, type AssessmentId, type MeResponse } from '@sanithelp/shared';
 import { api } from './api';
 import { Analysis } from './analysis/Analysis';
+import { SignatureEditor } from './Signature';
+import { Audit } from './Audit';
+import { ConsentHeader } from './flow/ConsentHeader';
 import { Icon, type IconName } from './icons';
-import { EmptyState, Modal, RowMenu, SecretModal, StatusBadge, useAction, type Secret } from './ui';
+import { EmptyState, Modal, RowMenu, SecretModal, SelectAll, StatusBadge, useAction, type Secret } from './ui';
 import { Users, type UserRow } from './Users';
 import { Loading, PageHero } from './BrandLoader';
 
@@ -20,69 +23,15 @@ function CampaignStats({ s }: { s: Campaign['stats'] }) {
   );
 }
 
-type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'perfil';
-
-/** Reduce la imagen de la firma (máx. 800 × 300) y la devuelve como PNG o, si pesa demasiado, JPEG. */
-async function prepareSignature(file: File): Promise<string> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((ok, bad) => {
-      const i = new Image();
-      i.onload = () => ok(i);
-      i.onerror = () => bad(new Error('No se pudo leer la imagen. Usa un archivo PNG o JPG.'));
-      i.src = url;
-    });
-    const k = Math.min(1, 800 / img.width, 300 / img.height);
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(img.width * k));
-    c.height = Math.max(1, Math.round(img.height * k));
-    const ctx = c.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, c.width, c.height);
-    const png = c.toDataURL('image/png');
-    if (png.length < 500_000) return png;
-    // Fondo blanco para el JPEG (no admite transparencia)
-    ctx.globalCompositeOperation = 'destination-over';
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.85);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'auditoria' | 'perfil';
 
 /** Firma de la psicóloga: se imprime en los documentos de las campañas de las que es responsable. */
 function SignatureCard() {
-  const [current, setCurrent] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const act = useAction();
-  const load = useCallback(() => api<{ signature: string | null }>('GET', '/api/profile').then((r) => { setCurrent(r.signature); setLoaded(true); }).catch(() => setLoaded(true)), []);
-  useEffect(() => { void load(); }, [load]);
-  if (!loaded) return <Loading />;
   return (
     <section className="panel pad" aria-labelledby="sg" style={{ maxWidth: '40rem', marginTop: '1rem' }}>
       <h2 id="sg" className="panel-title"><Icon name="edit" size={20} /> Mi firma</h2>
       <p className="muted">Sube una imagen de tu firma (PNG o JPG, de preferencia con fondo blanco o transparente). Se imprime en el consentimiento y en los informes de las campañas de las que eres responsable.</p>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
-      {(preview ?? current) ? (
-        <div style={{ background: '#fff', border: '1px solid var(--line, #ccd)', borderRadius: 8, padding: 8, display: 'inline-block', margin: '0.5rem 0' }}>
-          <img src={(preview ?? current)!} alt={preview ? 'Vista previa de la nueva firma' : 'Tu firma guardada'} style={{ maxWidth: '100%', maxHeight: 120, display: 'block' }} />
-        </div>
-      ) : <p className="muted">Todavía no has cargado tu firma.</p>}
-      <div>
-        <label htmlFor="sg-f">{current ? 'Reemplazar la imagen' : 'Imagen de la firma'}</label>
-        <input id="sg-f" type="file" accept="image/png,image/jpeg" onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = '';
-          if (!file) return;
-          void act.run(async () => { setPreview(await prepareSignature(file)); });
-        }} />
-      </div>
-      <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
-        <button className="btn" disabled={act.busy || !preview} onClick={() => void act.run(async () => { await api('PUT', '/api/profile/signature', { image: preview }); setPreview(null); await load(); })}><Icon name="check" /> Guardar firma</button>
-        {current && !preview && <button className="btn secondary" disabled={act.busy} onClick={() => { if (window.confirm('¿Quitar tu firma? Los documentos nuevos saldrán sin ella.')) void act.run(async () => { await api('DELETE', '/api/profile/signature'); await load(); }); }}>Quitar firma</button>}
-        {preview && <button className="btn secondary" onClick={() => setPreview(null)}>Cancelar</button>}
-      </div>
+      <SignatureEditor base="/api/profile" idPrefix="sg" />
     </section>
   );
 }
@@ -125,17 +74,17 @@ function ProfileCard({ onSaved }: { onSaved: () => void }) {
   );
 }
 
-function CompanyForm({ company, onDone, onClose }: { company: Company | null; onDone: () => Promise<void>; onClose: () => void }) {
+function CompanyForm({ company, psychologists, assigned, onDone, onClose }: { company: Company | null; psychologists: UserRow[]; assigned: string[]; onDone: () => Promise<void>; onClose: () => void }) {
   const act = useAction();
   const [name, setName] = useState(company?.name ?? '');
   const [code, setCode] = useState(company?.code ?? '');
   const [nit, setNit] = useState(company?.nit ?? '');
-  const [min, setMin] = useState(company?.minGroupSize ?? 5);
+  const [psyIds, setPsyIds] = useState<string[]>(assigned);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void act.run(async () => {
-      if (company) await api('PATCH', `/api/admin/companies/${company.id}`, { name, code, nit: nit.trim(), minGroupSize: min });
-      else await api('POST', '/api/admin/companies', { name, code, ...(nit.trim() ? { nit: nit.trim() } : {}), minGroupSize: min });
+      if (company) await api('PATCH', `/api/admin/companies/${company.id}`, { name, code, nit: nit.trim(), psychologistIds: psyIds });
+      else await api('POST', '/api/admin/companies', { name, code, ...(nit.trim() ? { nit: nit.trim() } : {}), psychologistIds: psyIds });
       await onDone();
       onClose();
     });
@@ -157,13 +106,23 @@ function CompanyForm({ company, onDone, onClose }: { company: Company | null; on
             <label htmlFor="co-t">NIT (opcional)</label>
             <input id="co-t" type="text" value={nit} onChange={(e) => setNit(e.target.value)} />
           </div>
-          <div>
-            <label htmlFor="co-m">Tamaño mínimo de grupo en reportes</label>
-            <select id="co-m" value={min} onChange={(e) => setMin(Number(e.target.value))}>
-              {[3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>{n} personas</option>)}
-            </select>
-          </div>
         </div>
+        <fieldset className="plain" style={{ marginTop: '1rem' }}>
+          <legend>Psicólogas responsables</legend>
+          {psychologists.length === 0 ? <p className="muted">Aún no hay psicólogas activas. Créalas en «Usuarios».</p> : (
+            <>
+            <SelectAll total={psychologists.length} selected={psychologists.filter((u) => psyIds.includes(u.id)).length} onChange={(all) => setPsyIds(all ? psychologists.map((u) => u.id) : [])} />
+            <div className="checks">
+              {psychologists.map((u) => (
+                <label className="check" key={u.id}>
+                  <input type="checkbox" checked={psyIds.includes(u.id)} onChange={(e) => setPsyIds(e.target.checked ? [...psyIds, u.id] : psyIds.filter((x) => x !== u.id))} /> {u.fullName || u.username}
+                </label>
+              ))}
+            </div>
+            </>
+          )}
+          <p className="muted">Ven las campañas y los resultados de esta empresa, y una de ellas puede ser la responsable de cada campaña (su firma sale en los documentos).</p>
+        </fieldset>
         <div className="dialog-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
           <button className="btn" disabled={act.busy || name.trim().length < 2 || code.length < 2}><Icon name="check" /> {company ? 'Guardar cambios' : 'Crear empresa'}</button>
@@ -259,6 +218,7 @@ function ConsentModal({ campaign, onClose }: { campaign: Campaign; onClose: () =
       <div className="doc" role="region" aria-label="Texto del consentimiento" tabIndex={0}>
         {docs.map((d) => (
           <div key={d.id}>
+            {d.header && <ConsentHeader header={d.header} />}
             <p><strong>{d.title}</strong></p>
             {d.blocks.map((b, i) => {
               const text = b.text.replace('{empresa}', campaign.companyName);
@@ -323,15 +283,17 @@ function CampaignForm({ companies, initialCompany, onDone, onSecret, onClose }: 
 
 export function Management({ me }: { me: MeResponse }) {
   const isAdmin = me.role === 'admin';
-  const tabs: { key: TabKey; label: string; icon: IconName }[] = [
+  // Auxiliar administrativo: solo ve las campañas que se le asignaron para descargar documentos.
+  const isAssistant = me.role === 'assistant';
+  const tabs: { key: TabKey; label: string; icon: IconName }[] = isAssistant ? [{ key: 'campanas', label: 'Campañas', icon: 'clipboard' }] : [
     { key: 'inicio', label: 'Inicio', icon: 'home' },
     { key: 'empresas', label: 'Empresas', icon: 'building' },
     { key: 'campanas', label: 'Campañas', icon: 'clipboard' },
-    ...(isAdmin ? [{ key: 'usuarios' as const, label: 'Usuarios', icon: 'users' as const }] : [{ key: 'perfil' as const, label: 'Mi perfil', icon: 'user' as const }]),
+    ...(isAdmin ? [{ key: 'usuarios' as const, label: 'Usuarios', icon: 'users' as const }, { key: 'auditoria' as const, label: 'Auditoría', icon: 'shield' as const }] : [{ key: 'perfil' as const, label: 'Mi perfil', icon: 'user' as const }]),
   ];
   const fromHash = (): TabKey => {
     const h = window.location.hash.replace('#/', '') as TabKey;
-    return tabs.some((t) => t.key === h) ? h : 'inicio';
+    return tabs.some((t) => t.key === h) ? h : tabs[0]!.key;
   };
 
   const [tab, setTabState] = useState<TabKey>(fromHash);
@@ -424,7 +386,7 @@ export function Management({ me }: { me: MeResponse }) {
           ))}
         </div>
         {tab === 'empresas' && isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Nueva empresa</button>}
-        {tab === 'campanas' && !analysis && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}
+        {tab === 'campanas' && !analysis && !isAssistant && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}
         {tab === 'usuarios' && <button className="btn" onClick={() => setNewUser(true)}><Icon name="plus" /> Nueva cuenta</button>}
       </nav>
 
@@ -541,7 +503,6 @@ export function Management({ me }: { me: MeResponse }) {
                       <dl className="facts">
                         <div><dt>Código</dt><dd><code>{c.code}</code></dd></div>
                         <div><dt>NIT</dt><dd>{c.nit || '—'}</dd></div>
-                        <div><dt>Grupo mínimo</dt><dd>{c.minGroupSize} personas</dd></div>
                         <div><dt>Campañas</dt><dd>{cps.length} ({cps.filter((x) => x.status === 'open').length} abiertas)</dd></div>
                         {isAdmin && <div><dt>Psicólogas</dt><dd>{team.length ? team.map((u) => u.fullName).join(', ') : 'Sin asignar'}</dd></div>}
                       </dl>
@@ -560,7 +521,7 @@ export function Management({ me }: { me: MeResponse }) {
         {tab === 'campanas' && (analysis ? (
           <>
             <button className="btn secondary sm" style={{ marginBottom: '0.75rem' }} onClick={() => setAnalysis(null)}><Icon name="back" /> Volver a campañas</button>
-            <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} assessments={analysis.assessments} isAdmin={isAdmin} onClose={() => setAnalysis(null)} />
+            <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} assessments={analysis.assessments} isAdmin={isAdmin || isAssistant} limited={isAssistant} onClose={() => setAnalysis(null)} />
           </>
         ) : (
           <>
@@ -586,12 +547,12 @@ export function Management({ me }: { me: MeResponse }) {
               </div>
             </div>
             {!loaded ? <Loading /> : shownCampaigns.length === 0 ? (
-              <EmptyState icon="clipboard" text="No hay campañas que coincidan.">{companies.length > 0 && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}</EmptyState>
+              <EmptyState icon="clipboard" text={isAssistant ? 'No tienes campañas asignadas. Pídele al administrador que te asigne empresas o campañas.' : 'No hay campañas que coincidan.'}>{companies.length > 0 && !isAssistant && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}</EmptyState>
             ) : (
               <div className="panel table-wrap">
                 <table className="table">
                   <caption className="sr-only">Campañas y su credencial de acceso</caption>
-                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Evaluaciones</th><th scope="col">Usuario de acceso</th><th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Evaluaciones</th>{!isAssistant && <th scope="col">Usuario de acceso</th>}<th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
                   <tbody>
                     {shownCampaigns.map((c) => (
                       <tr key={c.id}>
@@ -602,16 +563,19 @@ export function Management({ me }: { me: MeResponse }) {
                           <div className="muted"><small>Responsable: {c.responsibleName ?? 'la asignada a la empresa'}</small></div>
                           <div className="muted"><small>Consentimiento: {consentDocsFor(c.assessments).map((d) => d.label).join(' + ')}</small> <button type="button" className="btn secondary sm" onClick={() => setConsentView(c)}>Ver</button></div>
                         </td>
-                        <td><code>{c.accessUsername}</code></td>
+                        {!isAssistant && <td><code>{c.accessUsername}</code></td>}
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
                         <td className="actions">
+                          {!isAssistant && (
                           <button className="icon-btn" title="Ver usuario y contraseña" aria-label={`Ver usuario y contraseña de ${c.name}`} onClick={() => void act.run(async () => {
                             const r = await api<{ username: string; password: string | null }>('GET', `/api/campaigns/${c.id}/access`);
                             if (r.password === null) window.alert('Esta campaña es anterior a esta función y su contraseña no quedó guardada. Usa «Nueva contraseña de acceso» en el menú para generar una que sí se pueda consultar.');
                             else setSecret({ title: `Acceso de ${c.name}`, username: r.username, password: r.password, view: true });
                           })}><Icon name="lock" /></button>
-                          <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> Resultados</button>
+                          )}
+                          <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> {isAssistant ? 'Documentos' : 'Resultados'}</button>
+                          {!isAssistant && (
                           <RowMenu
                             label={`Más acciones para ${c.name}`}
                             items={[
@@ -632,6 +596,7 @@ export function Management({ me }: { me: MeResponse }) {
                               { label: 'Eliminar campaña', icon: 'trash', danger: true, onSelect: () => setDelCampaign(c) },
                             ]}
                           />
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -652,6 +617,7 @@ export function Management({ me }: { me: MeResponse }) {
               rows={users}
               loaded={usersLoaded}
               companies={companies}
+              campaigns={campaigns.map((c) => ({ id: c.id, name: c.name, companyName: c.companyName }))}
               reload={async () => { await Promise.all([loadUsers(), load()]); }}
               onSecret={(title, username, password) => setSecret({ title, username, password })}
               openNew={newUser}
@@ -659,6 +625,8 @@ export function Management({ me }: { me: MeResponse }) {
             />
           </>
         )}
+
+        {tab === 'auditoria' && isAdmin && <Audit />}
 
         {tab === 'perfil' && me.role === 'psychologist' && (
           <>
@@ -669,9 +637,9 @@ export function Management({ me }: { me: MeResponse }) {
         )}
       </div>
 
-      {newCompany && <CompanyForm company={null} onDone={load} onClose={() => setNewCompany(false)} />}
+      {newCompany && <CompanyForm company={null} psychologists={users.filter((u) => u.role === 'psychologist' && u.active)} assigned={[]} onDone={async () => { await load(); await loadUsers(); }} onClose={() => setNewCompany(false)} />}
       {newCampaign && <CampaignForm companies={activeCompanies} initialCompany={coFilter} onDone={load} onSecret={setSecret} onClose={() => setNewCampaign(false)} />}
-      {editCompany && <CompanyForm key={editCompany.id} company={editCompany} onDone={load} onClose={() => setEditCompany(null)} />}
+      {editCompany && <CompanyForm key={editCompany.id} company={editCompany} psychologists={users.filter((u) => u.role === 'psychologist' && u.active)} assigned={users.filter((u) => u.role === 'psychologist' && u.companies.some((c) => c.id === editCompany.id)).map((u) => u.id)} onDone={async () => { await load(); await loadUsers(); }} onClose={() => setEditCompany(null)} />}
       {delCompany && (
         <DeleteDialog
           title={`Eliminar ${delCompany.name}`}
