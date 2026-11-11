@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { addTemplatePages, drawX } from './questionnaires.js';
+import { drawSignatureIn, embedSignature } from './firma.js';
 
 const INK = rgb(0.05, 0.05, 0.35);
 
@@ -81,6 +82,10 @@ export async function consentInto(doc: PDFDocument, inp: ConsentPdfInput): Promi
     const at = inp.signedAt ?? new Date();
     fit(p2, font, `Firmado electrónicamente · ${dmy(at)} ${hm(at)}`, 222, 607.5, 228, 9);
   }
+
+  // Imagen de la firma de la psicóloga responsable, sobre el renglón «Firma del profesional de la salud responsable»
+  const sig = await embedSignature(doc, pr);
+  if (sig) drawSignatureIn(p2, sig, { x: 222, y: p2.getHeight() - 601, w: 200, h: 25 });
 
   // Anexos aceptados junto con el texto base: se imprimen tal cual se mostraron en pantalla
   if (inp.addenda?.length) {

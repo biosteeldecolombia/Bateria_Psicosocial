@@ -57,6 +57,20 @@
       "when": 1794426404082,
       "tag": "0007_participant_form_manual",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794429188094,
+      "tag": "0008_manual_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794429874230,
+      "tag": "0009_signature_and_responsible",
+      "breakpoints": true
     }
   ]
 }

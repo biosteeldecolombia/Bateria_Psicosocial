@@ -1,13 +1,13 @@
 import { questionnairesFor, type QuestionnaireId } from './instrument';
 
 /** Cualquier cuestionario que se responde en el flujo: los de la batería psicosocial, el DISC, el VALANTI y el 16PF. */
-export type InstrumentId = QuestionnaireId | 'disc' | 'valanti' | 'pf16';
+export type InstrumentId = QuestionnaireId | 'disc' | 'valanti' | 'pf16' | 'acrofobia' | 'claustrofobia';
 
 /**
  * Catálogo de evaluaciones que la psicóloga puede aplicar. Cada campaña elige cuáles.
  * `available: false` = ya está en el catálogo pero todavía no tiene cuestionario ni calificación (se activa al incorporarla).
  */
-export const ASSESSMENT_IDS = ['psychosocial', 'disc', 'valanti', 'pf16'] as const;
+export const ASSESSMENT_IDS = ['psychosocial', 'disc', 'valanti', 'pf16', 'acrofobia', 'claustrofobia'] as const;
 export type AssessmentId = (typeof ASSESSMENT_IDS)[number];
 
 export interface AssessmentDef {
@@ -22,6 +22,8 @@ export const ASSESSMENTS: Record<AssessmentId, AssessmentDef> = {
   disc: { id: 'disc', title: 'DISC', description: 'Estilo de comportamiento: dominancia, influencia, estabilidad y cumplimiento.', available: true },
   valanti: { id: 'valanti', title: 'VALANTI', description: 'Valores personales: verdad, rectitud, paz, amor y no violencia.', available: true },
   pf16: { id: 'pf16', title: '16PF', description: 'Cuestionario de personalidad de 16 factores (se aplica y se registra; la calificación está pendiente).', available: true },
+  acrofobia: { id: 'acrofobia', title: 'Acrofobia · Cohen (trabajo en alturas)', description: 'Miedo a las alturas: escala de ansiedad y de evitación (20 situaciones). Usa el consentimiento de evaluación ocupacional.', available: true },
+  claustrofobia: { id: 'claustrofobia', title: 'Claustrofobia · CLQ (espacios confinados)', description: 'Test de Radomsky (26 situaciones). La interpretación la marca la psicóloga. Usa el consentimiento de evaluación ocupacional.', available: true },
 };
 
 /**
@@ -36,6 +38,8 @@ export function instrumentsFor(assessments: readonly string[], form: 'A' | 'B' |
     if (id === 'disc') out.push('disc');
     if (id === 'valanti') out.push('valanti');
     if (id === 'pf16') out.push('pf16');
+    if (id === 'acrofobia') out.push('acrofobia');
+    if (id === 'claustrofobia') out.push('claustrofobia');
   }
   return out;
 }

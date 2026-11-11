@@ -3,6 +3,8 @@ import { nameParts } from '../results/names.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import {
+  ACROFOBIA_ANSWER_COUNT,
+  CLQ_COUNT,
   CONSENT_BLOCKS,
   CONSENT_DATE,
   CONSENT_OPTIONS,
@@ -15,16 +17,21 @@ import {
   QUESTIONNAIRES,
   applicableItems,
   consentAddendaFor,
+  consentDocsFor,
+  consentOptionsFor,
+  consentVersionLabel,
   formFromCargo,
   instrumentsFor,
   isValidDiscAnswer,
   isValidPf16Answer,
   isValidValantiAnswer,
+  isValidAcrofobiaAnswer,
+  isValidClqAnswer,
   validateFicha,
   type FichaAnswers,
   type InstrumentId,
 } from '@sanithelp/shared';
-import { campaigns, consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
+import { campaigns, companies, consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
 import { audit } from '../auth/service.js';
 
 /** Hash del texto exacto que se muestra, para dejar constancia de qué versión aceptó la persona. */
@@ -35,9 +42,20 @@ export const CONSENT_TEXT_HASH = createHash('sha256')
 /** Hash del texto que ve cada campaña: el base más los anexos de sus evaluaciones (sin anexos, es el hash de siempre). */
 export function consentTextFor(assessments: readonly string[]) {
   const addenda = consentAddendaFor(assessments);
-  if (!addenda.length) return { hash: CONSENT_TEXT_HASH, version: CONSENT_VERSION, addenda };
-  const hash = createHash('sha256').update(JSON.stringify({ base: CONSENT_TEXT_HASH, a: addenda })).digest('hex');
-  return { hash, version: `${CONSENT_VERSION} + anexo ${addenda.map((a) => a.id.toUpperCase()).join('/')} (borrador)`, addenda };
+  const docs = consentDocsFor(assessments);
+  const baseOnly = docs.length === 1 && docs[0]!.id === 'psychosocial';
+  const options = consentOptionsFor(docs);
+  const suffix = addenda.length ? ` + anexo ${addenda.map((a) => a.id.toUpperCase()).join('/')} (borrador)` : '';
+  if (baseOnly) {
+    if (!addenda.length) return { hash: CONSENT_TEXT_HASH, version: CONSENT_VERSION, addenda, docs, options };
+    const hash = createHash('sha256').update(JSON.stringify({ base: CONSENT_TEXT_HASH, a: addenda })).digest('hex');
+    return { hash, version: `${CONSENT_VERSION}${suffix}`, addenda, docs, options };
+  }
+  // Con evaluación ocupacional (sola o junto a la batería): el hash cubre cada documento mostrado, las opciones y los anexos.
+  const hash = createHash('sha256')
+    .update(JSON.stringify({ docs: docs.map((d) => ({ id: d.id, t: d.title, b: d.blocks, o: d.options })), o: options, a: addenda }))
+    .digest('hex');
+  return { hash, version: `${consentVersionLabel(docs)}${suffix}`, addenda, docs, options };
 }
 
 interface StoredQ {
@@ -47,10 +65,10 @@ interface StoredQ {
   v?: number;
 }
 
-const isId = (v: unknown): v is InstrumentId => v === 'disc' || v === 'valanti' || v === 'pf16' || (typeof v === 'string' && v in QUESTIONNAIRES);
+const isId = (v: unknown): v is InstrumentId => v === 'disc' || v === 'valanti' || v === 'pf16' || v === 'acrofobia' || v === 'claustrofobia' || (typeof v === 'string' && v in QUESTIONNAIRES);
 
 /** Cantidad de preguntas que debe responder la persona en un cuestionario. */
-const totalOf = (id: InstrumentId, gates: StoredQ['gates']) => (id === 'disc' ? DISC_GROUPS.length : id === 'valanti' ? VALANTI_PAIRS.length : id === 'pf16' ? PF16_ITEMS.length : applicableItems(QUESTIONNAIRES[id], gates).length);
+const totalOf = (id: InstrumentId, gates: StoredQ['gates']) => (id === 'disc' ? DISC_GROUPS.length : id === 'valanti' ? VALANTI_PAIRS.length : id === 'pf16' ? PF16_ITEMS.length : id === 'acrofobia' ? ACROFOBIA_ANSWER_COUNT : id === 'claustrofobia' ? CLQ_COUNT : applicableItems(QUESTIONNAIRES[id], gates).length);
 
 /**
  * Flujo del colaborador: consentimiento → ficha → cuestionarios → envío.
@@ -138,11 +156,17 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
   app.get('/consent', { preHandler: only }, async (req, reply) => {
     const p = await me(req, reply);
     if (!p) return;
+    const assessments = await assessmentsOf(p);
+    const text = consentTextFor(assessments);
+    const [co] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, p.companyId)).limit(1);
     return {
-      version: CONSENT_VERSION,
+      version: text.version,
       date: CONSENT_DATE,
-      hash: consentTextFor(await assessmentsOf(p)).hash,
-      addenda: consentTextFor(await assessmentsOf(p)).addenda,
+      hash: text.hash,
+      addenda: text.addenda,
+      docs: text.docs.map((d) => ({ id: d.id, title: d.title, blocks: d.blocks })),
+      options: text.options,
+      company: co?.name ?? '',
       fullName: nameParts(crypto, p).full,
       document: crypto.decrypt(p.documentEnc),
       decision: (await consentOf(p.id))?.decision ?? null,
@@ -245,7 +269,7 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
     const g = await guardQ(req, reply);
     if (!g) return;
     if ((await qOf(g.p.id, g.id)).complete) return closed(reply);
-    if (g.id === 'disc' || g.id === 'valanti' || g.id === 'pf16') return saveSimple(req, reply, g.p, g.id);
+    if (g.id === 'disc' || g.id === 'valanti' || g.id === 'pf16' || g.id === 'acrofobia' || g.id === 'claustrofobia') return saveSimple(req, reply, g.p, g.id);
     const def = QUESTIONNAIRES[g.id];
     const b = (req.body ?? {}) as { answers?: Record<string, unknown>; gates?: Record<string, unknown>; complete?: unknown };
     const answers: Record<string, number> = {};
@@ -285,16 +309,18 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
   /**
    * Evaluaciones de una respuesta numérica por pregunta, sin compuertas.
    * DISC: grupo → posición MÁS × 4 + posición MENOS (posiciones distintas). VALANTI: pareja → puntos de la frase A (0 a 3). 16PF: cuestión → índice de la opción (0 = A, 1 = B, 2 = C).
+   * Acrofobia: 1 a 20 = ansiedad (0 a 6), 21 a 40 = evitación (0 a 2). CLQ: situación → malestar (0 a 4).
    */
-  async function saveSimple(req: FastifyRequest, reply: FastifyReply, p: typeof participants.$inferSelect, instrument: 'disc' | 'valanti' | 'pf16') {
-    const count = instrument === 'disc' ? DISC_GROUPS.length : instrument === 'valanti' ? VALANTI_PAIRS.length : PF16_ITEMS.length;
-    const valid = instrument === 'disc' ? isValidDiscAnswer : instrument === 'valanti' ? isValidValantiAnswer : isValidPf16Answer;
+  async function saveSimple(req: FastifyRequest, reply: FastifyReply, p: typeof participants.$inferSelect, instrument: 'disc' | 'valanti' | 'pf16' | 'acrofobia' | 'claustrofobia') {
+    const count = totalOf(instrument, {});
+    const valid = (n: number, v: unknown) =>
+      instrument === 'disc' ? isValidDiscAnswer(v) : instrument === 'valanti' ? isValidValantiAnswer(v) : instrument === 'pf16' ? isValidPf16Answer(v) : instrument === 'acrofobia' ? isValidAcrofobiaAnswer(n, v) : isValidClqAnswer(v);
     const b = (req.body ?? {}) as { answers?: Record<string, unknown>; complete?: unknown };
     const answers: Record<string, number> = {};
     for (const [k, v] of Object.entries(b.answers ?? {})) {
       const n = Number(k);
-      if (!Number.isInteger(n) || n < 1 || n > count || !valid(v)) return reply.code(400).send({ error: 'Respuesta inválida.' });
-      answers[k] = v;
+      if (!Number.isInteger(n) || n < 1 || n > count || !valid(n, v)) return reply.code(400).send({ error: 'Respuesta inválida.' });
+      answers[k] = v as number;
     }
     const complete = b.complete === true;
     if (complete) {

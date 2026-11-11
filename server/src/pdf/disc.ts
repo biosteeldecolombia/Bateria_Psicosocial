@@ -2,6 +2,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf
 import { DISC_GROUPS, DISC_SCALES, decodeDisc, type DiscScale } from '@sanithelp/shared';
 import type { DiscRecord } from '../results/disc.js';
 import type { Professional } from './expediente.js';
+import { SIGNATURE_BLOCK_H, drawSignatureBlock } from './firma.js';
 
 const NAMES: Record<DiscScale, string> = { D: 'Dominancia', I: 'Influencia', S: 'Estabilidad', C: 'Cumplimiento' };
 const BAR: Record<DiscScale, [number, number, number]> = { D: [0.78, 0.22, 0.2], I: [0.9, 0.62, 0.1], S: [0.25, 0.62, 0.35], C: [0.25, 0.4, 0.75] };
@@ -156,6 +157,8 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
     pg.drawText(safe(`${i + 1}. MÁS: ${w[mas] ?? '—'} · MENOS: ${w[menos] ?? '—'}`), { x: M + col * colW, y: yy, size: 8, font, color: INK });
   }
 
+  ensure(SIGNATURE_BLOCK_H + 10);
+  await drawSignatureBlock(doc, pg, professional, y, M, font);
   const pro = [professional.name && `Profesional responsable: ${professional.name}`, professional.document && `Documento: ${professional.document}`, professional.registry && `Registro profesional: ${professional.registry}`].filter(Boolean).join(' · ');
   const stamp = `Confidencial — uso exclusivo del profesional responsable · Generado el ${pad(generatedAt.getDate())}/${pad(generatedAt.getMonth() + 1)}/${generatedAt.getFullYear()} ${pad(generatedAt.getHours())}:${pad(generatedAt.getMinutes())}`;
   for (const p of pages) {

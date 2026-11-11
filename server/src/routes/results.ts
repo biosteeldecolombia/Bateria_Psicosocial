@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { nameParts } from '../results/names.js';
 import { and, eq, inArray } from 'drizzle-orm';
-import { DISC_DATA_VERSION, PF16_ITEMS } from '@sanithelp/shared';
+import { DISC_DATA_VERSION, PF16_ITEMS, isClqLevel } from '@sanithelp/shared';
 import {
   DOMAIN_BLOCKS,
   GROUPING_FIELDS,
@@ -17,7 +17,7 @@ import {
   type GroupingField,
   type RpsRow,
 } from '@sanithelp/scoring';
-import { consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
+import { consents, fichaAnswers, manualResults, participants, questionnaireAnswers } from '../db/schema.js';
 import { audit } from '../auth/service.js';
 import { manageableCampaign } from '../auth/access.js';
 import { clinicalAccess as clinical } from '../auth/clinical.js';
@@ -25,6 +25,7 @@ import { loadRecords } from '../results/service.js';
 import { discView, loadDisc } from '../results/disc.js';
 import { loadValanti, valantiView } from '../results/valanti.js';
 import { loadIndividual } from '../results/individual.js';
+import { acrofobiaView, clqView, loadAcrofobia, loadClq } from '../results/ocupacionales.js';
 import { newResumeCode, normalizeCode } from './participation.js';
 
 const csvCell = (v: unknown) => {
@@ -83,7 +84,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
           consent: cs ? (cs.revokedAt ? 'revoked' : cs.decision) : null,
           form: p.form,
           formManual: p.formManual,
-          progress: { ficha: fichaBy.get(p.id) ?? false, intralaboral: done.some((x) => x.startsWith('intra')), extralaboral: done.includes('extra'), estres: done.includes('stress'), disc: done.includes('disc'), discOutdated: staleDisc.has(p.id), valanti: done.includes('valanti'), pf16: done.includes('pf16') },
+          progress: { ficha: fichaBy.get(p.id) ?? false, intralaboral: done.some((x) => x.startsWith('intra')), extralaboral: done.includes('extra'), estres: done.includes('stress'), disc: done.includes('disc'), discOutdated: staleDisc.has(p.id), valanti: done.includes('valanti'), pf16: done.includes('pf16'), acrofobia: done.includes('acrofobia'), claustrofobia: done.includes('claustrofobia') },
           startedAt: p.createdAt,
           submittedAt: p.submittedAt,
         };
@@ -182,6 +183,46 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     const recs = await loadValanti(db, crypto, c.id);
     await audit(db, req.auth!.user.id, 'results.valanti_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
     return { people: recs.map(valantiView) };
+  });
+
+  /** Acrofobia de Cohen: escalas de ansiedad y evitación con su nivel, por persona. */
+  app.get('/campaigns/:id/acrofobia', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const c = await clinicalAccess(req, reply, id);
+    if (!c) return;
+    const recs = await loadAcrofobia(db, crypto, c.id);
+    await audit(db, req.auth!.user.id, 'results.acrofobia_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
+    return { people: recs.map(acrofobiaView) };
+  });
+
+  /** CLQ: puntaje total y la interpretación que marca la psicóloga. */
+  app.get('/campaigns/:id/claustrofobia', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const c = await clinicalAccess(req, reply, id);
+    if (!c) return;
+    const recs = await loadClq(db, crypto, c.id);
+    await audit(db, req.auth!.user.id, 'results.claustrofobia_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
+    return { people: recs.map(clqView) };
+  });
+
+  /** La psicóloga marca la interpretación del CLQ (bajo, moderado o alto). Habilita la descarga del PDF. */
+  app.put('/participants/:id/claustrofobia', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const c = await clinicalAccess(req, reply, p.campaignId);
+    if (!c) return;
+    const level = (req.body as { level?: unknown } | null)?.level;
+    if (!isClqLevel(level)) return reply.code(400).send({ error: 'Elige el nivel: bajo, moderado o alto.' });
+    const [rec] = await loadClq(db, crypto, c.id, id);
+    if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene el CLQ completo.' });
+    const dataEnc = crypto.encrypt(JSON.stringify({ level }));
+    await db
+      .insert(manualResults)
+      .values({ participantId: id, instrument: 'claustrofobia', dataEnc, updatedBy: req.auth!.user.id })
+      .onConflictDoUpdate({ target: [manualResults.participantId, manualResults.instrument], set: { dataEnc, updatedBy: req.auth!.user.id, updatedAt: new Date() } });
+    await audit(db, req.auth!.user.id, 'results.claustrofobia_marked', { type: 'participant', id }, { level });
+    return { ok: true, level };
   });
 
   /** 16PF: quién completó el cuestionario (la calificación no está incluida: requiere las plantillas y baremos del editor). */

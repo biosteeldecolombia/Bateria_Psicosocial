@@ -7,6 +7,9 @@ export * from './disc';
 export * from './valanti';
 export * from './pf16';
 export * from './consent';
+export * from './consent_ocupacional';
+export * from './acrofobia';
+export * from './claustrofobia';
 export * from './ficha';
 
 export const ROLES = ['admin', 'psychologist', 'collaborator', 'company'] as const;
@@ -89,7 +92,9 @@ export const updateCompanySchema = z.object({
   active: z.boolean().optional(),
 });
 
-export const updateCampaignSchema = z.object({ name: z.string().trim().min(2).max(200) });
+export const updateCampaignSchema = z
+  .object({ name: z.string().trim().min(2).max(200).optional(), responsibleId: z.string().uuid().nullable().optional() })
+  .refine((b) => b.name !== undefined || b.responsibleId !== undefined);
 
 /** Cuentas de personas (admin, psicóloga, empresa). Los colaboradores no tienen cuenta: usan la credencial de la campaña. */
 export const createUserSchema = z.object({

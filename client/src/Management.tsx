@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ASSESSMENTS, ASSESSMENT_IDS, type AssessmentId, type MeResponse } from '@sanithelp/shared';
+import { ASSESSMENTS, ASSESSMENT_IDS, consentDocsFor, consentVersionLabel, type AssessmentId, type MeResponse } from '@sanithelp/shared';
 import { api } from './api';
 import { Analysis } from './analysis/Analysis';
 import { Icon, type IconName } from './icons';
@@ -8,7 +8,7 @@ import { Users, type UserRow } from './Users';
 import { Loading, PageHero } from './BrandLoader';
 
 interface Company { id: string; name: string; code: string; nit: string | null; minGroupSize: number; active: boolean }
-interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; assessments: string[]; createdAt: string; participantCount: number; stats: { started: number; completed: number; inProgress: number; declined: number; revoked: number } }
+interface Campaign { id: string; companyId: string; name: string; status: 'open' | 'closed'; companyName: string; accessUsername: string | null; assessments: string[]; responsibleUserId?: string | null; responsibleName?: string | null; createdAt: string; participantCount: number; stats: { started: number; completed: number; inProgress: number; declined: number; revoked: number } }
 
 /** Totales de respuestas de una campaña, visibles sin abrir los resultados. */
 function CampaignStats({ s }: { s: Campaign['stats'] }) {
@@ -21,6 +21,71 @@ function CampaignStats({ s }: { s: Campaign['stats'] }) {
 }
 
 type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'perfil';
+
+/** Reduce la imagen de la firma (máx. 800 × 300) y la devuelve como PNG o, si pesa demasiado, JPEG. */
+async function prepareSignature(file: File): Promise<string> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, bad) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => bad(new Error('No se pudo leer la imagen. Usa un archivo PNG o JPG.'));
+      i.src = url;
+    });
+    const k = Math.min(1, 800 / img.width, 300 / img.height);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.width * k));
+    c.height = Math.max(1, Math.round(img.height * k));
+    const ctx = c.getContext('2d')!;
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    const png = c.toDataURL('image/png');
+    if (png.length < 500_000) return png;
+    // Fondo blanco para el JPEG (no admite transparencia)
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Firma de la psicóloga: se imprime en los documentos de las campañas de las que es responsable. */
+function SignatureCard() {
+  const [current, setCurrent] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const act = useAction();
+  const load = useCallback(() => api<{ signature: string | null }>('GET', '/api/profile').then((r) => { setCurrent(r.signature); setLoaded(true); }).catch(() => setLoaded(true)), []);
+  useEffect(() => { void load(); }, [load]);
+  if (!loaded) return <Loading />;
+  return (
+    <section className="panel pad" aria-labelledby="sg" style={{ maxWidth: '40rem', marginTop: '1rem' }}>
+      <h2 id="sg" className="panel-title"><Icon name="edit" size={20} /> Mi firma</h2>
+      <p className="muted">Sube una imagen de tu firma (PNG o JPG, de preferencia con fondo blanco o transparente). Se imprime en el consentimiento y en los informes de las campañas de las que eres responsable.</p>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      {(preview ?? current) ? (
+        <div style={{ background: '#fff', border: '1px solid var(--line, #ccd)', borderRadius: 8, padding: 8, display: 'inline-block', margin: '0.5rem 0' }}>
+          <img src={(preview ?? current)!} alt={preview ? 'Vista previa de la nueva firma' : 'Tu firma guardada'} style={{ maxWidth: '100%', maxHeight: 120, display: 'block' }} />
+        </div>
+      ) : <p className="muted">Todavía no has cargado tu firma.</p>}
+      <div>
+        <label htmlFor="sg-f">{current ? 'Reemplazar la imagen' : 'Imagen de la firma'}</label>
+        <input id="sg-f" type="file" accept="image/png,image/jpeg" onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (!file) return;
+          void act.run(async () => { setPreview(await prepareSignature(file)); });
+        }} />
+      </div>
+      <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
+        <button className="btn" disabled={act.busy || !preview} onClick={() => void act.run(async () => { await api('PUT', '/api/profile/signature', { image: preview }); setPreview(null); await load(); })}><Icon name="check" /> Guardar firma</button>
+        {current && !preview && <button className="btn secondary" disabled={act.busy} onClick={() => { if (window.confirm('¿Quitar tu firma? Los documentos nuevos saldrán sin ella.')) void act.run(async () => { await api('DELETE', '/api/profile/signature'); await load(); }); }}>Quitar firma</button>}
+        {preview && <button className="btn secondary" onClick={() => setPreview(null)}>Cancelar</button>}
+      </div>
+    </section>
+  );
+}
 
 /** Datos profesionales de la psicóloga: salen en el consentimiento de cada expediente en PDF. */
 function ProfileCard({ onSaved }: { onSaved: () => void }) {
@@ -111,6 +176,15 @@ function CompanyForm({ company, onDone, onClose }: { company: Company | null; on
 function RenameCampaign({ campaign, onDone, onClose }: { campaign: Campaign; onDone: () => Promise<void>; onClose: () => void }) {
   const act = useAction();
   const [name, setName] = useState(campaign.name);
+  const [resp, setResp] = useState<{ responsibleId: string | null; options: { id: string; name: string; hasSignature: boolean }[] } | null>(null);
+  const [responsibleId, setResponsibleId] = useState(campaign.responsibleUserId ?? '');
+  useEffect(() => {
+    api<{ responsibleId: string | null; options: { id: string; name: string; hasSignature: boolean }[] }>('GET', `/api/campaigns/${campaign.id}/responsibles`)
+      .then((r) => { setResp(r); setResponsibleId(r.responsibleId ?? ''); })
+      .catch(() => setResp({ responsibleId: null, options: [] }));
+  }, [campaign.id]);
+  const nameChanged = name.trim() !== campaign.name;
+  const respChanged = (resp?.responsibleId ?? '') !== responsibleId;
   return (
     <Modal title="Editar campaña" icon="edit" size="sm" onClose={onClose}>
       {act.error && <div className="alert error" role="alert">{act.error}</div>}
@@ -118,14 +192,23 @@ function RenameCampaign({ campaign, onDone, onClose }: { campaign: Campaign; onD
         noValidate
         onSubmit={(e) => {
           e.preventDefault();
-          void act.run(async () => { await api('PATCH', `/api/campaigns/${campaign.id}`, { name }); await onDone(); onClose(); });
+          void act.run(async () => {
+            await api('PATCH', `/api/campaigns/${campaign.id}`, { ...(nameChanged ? { name } : {}), ...(respChanged ? { responsibleId: responsibleId || null } : {}) });
+            await onDone();
+            onClose();
+          });
         }}
       >
         <label htmlFor="rn-n">Nombre de la campaña</label>
         <input id="rn-n" type="text" value={name} onChange={(e) => setName(e.target.value)} />
+        <label htmlFor="rn-r">Psicóloga responsable (su firma sale en los documentos)</label>
+        <select id="rn-r" value={responsibleId} onChange={(e) => setResponsibleId(e.target.value)} disabled={!resp}>
+          <option value="">La asignada a la empresa</option>
+          {resp?.options.map((o) => <option key={o.id} value={o.id}>{o.name}{o.hasSignature ? '' : ' (sin firma cargada)'}</option>)}
+        </select>
         <div className="dialog-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn" disabled={act.busy || name.trim().length < 2 || name.trim() === campaign.name}><Icon name="check" /> Guardar</button>
+          <button className="btn" disabled={act.busy || name.trim().length < 2 || (!nameChanged && !respChanged)}><Icon name="check" /> Guardar</button>
         </div>
       </form>
     </Modal>
@@ -163,6 +246,28 @@ function DeleteDialog({ title, warning, confirmName, blocked, onConfirm, onClose
           </div>
         </form>
       )}
+    </Modal>
+  );
+}
+
+/** Consentimiento que aplica a una campaña según sus evaluaciones (para que la psicóloga lo vea). */
+function ConsentModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+  const docs = consentDocsFor(campaign.assessments);
+  return (
+    <Modal title={`Consentimiento de ${campaign.name}`} icon="shield" onClose={onClose}>
+      <p className="muted">Código {consentVersionLabel(docs)}. {docs.length > 1 ? 'La persona ve los dos documentos y toma una sola decisión.' : ''}</p>
+      <div className="doc" role="region" aria-label="Texto del consentimiento" tabIndex={0}>
+        {docs.map((d) => (
+          <div key={d.id}>
+            <p><strong>{d.title}</strong></p>
+            {d.blocks.map((b, i) => {
+              const text = b.text.replace('{empresa}', campaign.companyName);
+              return b.kind === 'h' ? <h2 key={i}>{text}</h2> : b.kind === 'li' ? <ul key={i}><li>{text}</li></ul> : <p key={i}>{text}</p>;
+            })}
+          </div>
+        ))}
+      </div>
+      <div className="dialog-actions"><button type="button" className="btn secondary" onClick={onClose}>Cerrar</button></div>
     </Modal>
   );
 }
@@ -237,6 +342,7 @@ export function Management({ me }: { me: MeResponse }) {
   const [loaded, setLoaded] = useState(false);
   const [secret, setSecret] = useState<Secret | null>(null);
   const [analysis, setAnalysis] = useState<Campaign | null>(null);
+  const [consentView, setConsentView] = useState<Campaign | null>(null);
   const [profileDone, setProfileDone] = useState(true);
   const [newCompany, setNewCompany] = useState(false);
   const [newCampaign, setNewCampaign] = useState(false);
@@ -491,7 +597,11 @@ export function Management({ me }: { me: MeResponse }) {
                       <tr key={c.id}>
                         <td>{c.companyName}</td>
                         <td><strong>{c.name}</strong></td>
-                        <td>{c.assessments.map((a) => <span key={a} className="chip">{ASSESSMENTS[a as AssessmentId]?.title ?? a}</span>)}</td>
+                        <td>
+                          {c.assessments.map((a) => <span key={a} className="chip">{ASSESSMENTS[a as AssessmentId]?.title ?? a}</span>)}
+                          <div className="muted"><small>Responsable: {c.responsibleName ?? 'la asignada a la empresa'}</small></div>
+                          <div className="muted"><small>Consentimiento: {consentDocsFor(c.assessments).map((d) => d.label).join(' + ')}</small> <button type="button" className="btn secondary sm" onClick={() => setConsentView(c)}>Ver</button></div>
+                        </td>
                         <td><code>{c.accessUsername}</code></td>
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
@@ -554,6 +664,7 @@ export function Management({ me }: { me: MeResponse }) {
           <>
             <div className="page-head"><h1>Mi perfil</h1></div>
             <ProfileCard onSaved={checkProfile} />
+            <SignatureCard />
           </>
         )}
       </div>
@@ -570,6 +681,7 @@ export function Management({ me }: { me: MeResponse }) {
         />
       )}
       {editCampaign && <RenameCampaign key={editCampaign.id} campaign={editCampaign} onDone={load} onClose={() => setEditCampaign(null)} />}
+      {consentView && <ConsentModal campaign={consentView} onClose={() => setConsentView(null)} />}
       {delCampaign && (
         <DeleteDialog
           title={`Eliminar ${delCampaign.name}`}

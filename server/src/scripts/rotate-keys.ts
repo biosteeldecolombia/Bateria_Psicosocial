@@ -3,10 +3,12 @@ import type { Crypto } from '../security/crypto.js';
 
 /** Columnas cifradas por tabla. Si se agrega una columna `*_enc`, debe agregarse aquí (lo verifica una prueba). */
 export const ENCRYPTED_COLUMNS: Record<string, string[]> = {
-  users: ['username_enc', 'full_name_enc', 'professional_registry_enc', 'professional_document_enc', 'mfa_secret_enc'],
+  users: ['username_enc', 'full_name_enc', 'professional_registry_enc', 'professional_document_enc', 'mfa_secret_enc', 'signature_enc'],
   participants: ['document_enc', 'full_name_enc', 'surnames_enc'],
   ficha_answers: ['data_enc'],
   questionnaire_answers: ['data_enc'],
+  manual_results: ['data_enc'],
+  campaigns: ['access_password_enc'],
 };
 
 /**

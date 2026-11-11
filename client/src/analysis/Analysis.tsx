@@ -44,14 +44,14 @@ interface Participant {
   consent: string | null;
   form: string | null;
   formManual?: boolean;
-  progress: { ficha: boolean; intralaboral: boolean; extralaboral: boolean; estres: boolean; disc: boolean; discOutdated?: boolean; valanti: boolean; pf16: boolean };
+  progress: { ficha: boolean; intralaboral: boolean; extralaboral: boolean; estres: boolean; disc: boolean; discOutdated?: boolean; valanti: boolean; pf16: boolean; acrofobia?: boolean; claustrofobia?: boolean };
   submittedAt: string | null;
 }
 
 const STATUS: Record<string, string> = { in_progress: 'En curso', completed: 'Completó', declined: 'No autorizó', revoked: 'Revocó' };
 const CONSENT: Record<string, string> = { authorized: 'Autorizó', declined: 'No autorizó', revoked: 'Revocó' };
 
-type Tab = 'participants' | 'summary' | 'group' | 'domains' | 'register' | 'disc' | 'valanti' | 'pf16';
+type Tab = 'participants' | 'summary' | 'group' | 'domains' | 'register' | 'disc' | 'valanti' | 'pf16' | 'acrofobia' | 'claustrofobia';
 const TABS: [Tab, string][] = [
   ['participants', 'Participantes'],
   ['summary', 'Resumen total'],
@@ -61,6 +61,8 @@ const TABS: [Tab, string][] = [
   ['disc', 'DISC'],
   ['valanti', 'VALANTI'],
   ['pf16', '16PF'],
+  ['acrofobia', 'Acrofobia'],
+  ['claustrofobia', 'Claustrofobia'],
 ];
 
 export function Analysis({ campaignId, campaignName, assessments, isAdmin, onClose }: { campaignId: string; campaignName: string; assessments: string[]; isAdmin: boolean; onClose: () => void }) {
@@ -68,7 +70,9 @@ export function Analysis({ campaignId, campaignName, assessments, isAdmin, onClo
   const hasDisc = assessments.includes('disc');
   const hasValanti = assessments.includes('valanti');
   const hasPf16 = assessments.includes('pf16');
-  const tabs = TABS.filter(([k]) => (k === 'disc' ? hasDisc : k === 'valanti' ? hasValanti : k === 'pf16' ? hasPf16 : k === 'participants' || hasPsy));
+  const hasAcro = assessments.includes('acrofobia');
+  const hasClq = assessments.includes('claustrofobia');
+  const tabs = TABS.filter(([k]) => (k === 'disc' ? hasDisc : k === 'valanti' ? hasValanti : k === 'pf16' ? hasPf16 : k === 'acrofobia' ? hasAcro : k === 'claustrofobia' ? hasClq : k === 'participants' || hasPsy));
   const [tab, setTab] = useState<Tab>(hasPsy ? 'summary' : 'participants');
   const [reason, setReason] = useState('');
   const [reasonOk, setReasonOk] = useState(!isAdmin);
@@ -116,6 +120,8 @@ export function Analysis({ campaignId, campaignName, assessments, isAdmin, onClo
             {tab === 'disc' && <DiscView campaignId={campaignId} qs={q} />}
             {tab === 'valanti' && <ValantiView campaignId={campaignId} qs={q} />}
             {tab === 'pf16' && <Pf16View campaignId={campaignId} qs={q} />}
+            {tab === 'acrofobia' && <AcrofobiaView campaignId={campaignId} qs={q} />}
+            {tab === 'claustrofobia' && <ClaustrofobiaView campaignId={campaignId} qs={q} />}
           </div>
         </>
       )}
@@ -205,6 +211,8 @@ function repeatOptions(p: Participant): { id: string; label: string }[] {
     pr.disc || pr.discOutdated ? { id: 'disc', label: pr.discOutdated ? 'DISC (respuestas antiguas, por repetir)' : 'DISC' } : null,
     pr.valanti ? { id: 'valanti', label: 'VALANTI' } : null,
     pr.pf16 ? { id: 'pf16', label: '16PF' } : null,
+    pr.acrofobia ? { id: 'acrofobia', label: 'Acrofobia (Cohen)' } : null,
+    pr.claustrofobia ? { id: 'claustrofobia', label: 'Claustrofobia (CLQ)' } : null,
   ].filter((o): o is { id: string; label: string } => o !== null);
 }
 
@@ -349,7 +357,7 @@ function Participants({ campaignId, qs, reason }: { campaignId: string; qs: (e?:
                     ) : '—'}
                     {p.formManual && <div className="muted">manual</div>}
                   </td>
-                  <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés', p.progress.disc && 'DISC', p.progress.discOutdated && 'DISC (por repetir)', p.progress.valanti && 'VALANTI', p.progress.pf16 && '16PF'].filter(Boolean).join(' · ') || '—'}</td>
+                  <td>{[p.progress.ficha && 'Ficha', p.progress.intralaboral && 'Intra', p.progress.extralaboral && 'Extra', p.progress.estres && 'Estrés', p.progress.disc && 'DISC', p.progress.discOutdated && 'DISC (por repetir)', p.progress.valanti && 'VALANTI', p.progress.pf16 && '16PF', p.progress.acrofobia && 'Acrofobia', p.progress.claustrofobia && 'CLQ'].filter(Boolean).join(' · ') || '—'}</td>
                   <td>
                     {p.consent && (
                       <button className="btn secondary" onClick={async () => { setPdfErr(''); try { await downloadFile(`/api/participants/${p.id}/expediente.pdf${qs()}`, `Expediente_${p.document}.pdf`); } catch (e) { setPdfErr((e as Error).message); } }}>PDF</button>
@@ -575,6 +583,137 @@ function DiscView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => 
 }
 
 /** 16PF: quién lo completó, hoja de respuestas (en pantalla y en PDF) y exportación para la corrección en la plataforma del editor. */
+interface AcroPerson {
+  participantId: string;
+  person: { document: string; fullName: string };
+  date: string;
+  anxiety: { total: number; level: string; answered: number };
+  avoidance: { total: number; level: string; answered: number };
+  items: { n: number; anxiety?: number; avoidance?: number }[];
+}
+
+/** Acrofobia de Cohen: puntaje y nivel de las escalas de ansiedad (0 a 120) y evitación (0 a 40) por persona. */
+function AcrofobiaView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
+  const { data, error, loading } = useLoad<{ people: AcroPerson[] }>(`/api/campaigns/${campaignId}/acrofobia${qs()}`);
+  const [dlErr, setDlErr] = useState('');
+  if (loading && !data) return <Loading />;
+  if (error) return <div className="alert error" role="alert">{error}</div>;
+  const people = data?.people ?? [];
+  return (
+    <>
+      {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
+      {people.length === 0 ? <p className="muted">Todavía nadie ha completado la Acrofobia.</p> : (
+        <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
+          <table className="table">
+            <caption className="sr-only">Acrofobia de Cohen por persona</caption>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Ansiedad (0-120)</th><th scope="col">Evitación (0-40)</th><th scope="col">Fecha</th><th scope="col"><span className="sr-only">Informe</span></th></tr></thead>
+            <tbody>
+              {people.map((p) => (
+                <ReportRow
+                  key={p.participantId}
+                  colSpan={6}
+                  cells={<>
+                    <td>{p.person.document}</td>
+                    <td>{p.person.fullName}</td>
+                    <td><strong>{p.anxiety.total}</strong> · {p.anxiety.level}</td>
+                    <td><strong>{p.avoidance.total}</strong> · {p.avoidance.level}</td>
+                    <td>{fmtDate(p.date)}</td>
+                  </>}
+                  actions={<PdfButton url={`/api/participants/${p.participantId}/acrofobia.pdf${qs()}`} name={`Acrofobia_${p.person.document}.pdf`} label="Informe PDF" onError={setDlErr} />}
+                >
+                  <h3>Acrofobia de Cohen · {p.person.fullName}</h3>
+                  <p className="muted">Aplicado el {fmtDate(p.date)}. Ansiedad: {p.anxiety.answered} de 20 respondidas; evitación: {p.avoidance.answered} de 20.</p>
+                  <ScoreBar label="Ansiedad" value={p.anxiety.total} min={0} max={120} text={`${p.anxiety.total} de 120 · ${p.anxiety.level}`} />
+                  <ScoreBar label="Evitación" value={p.avoidance.total} min={0} max={40} text={`${p.avoidance.total} de 40 · ${p.avoidance.level}`} />
+                  <ol className="pf-grid" aria-label="Respuestas por situación (ansiedad / evitación)">
+                    {p.items.map((it) => <li key={it.n}><span className="muted">{it.n}</span> <strong>{it.anxiety ?? '-'} / {it.avoidance ?? '-'}</strong></li>)}
+                  </ol>
+                </ReportRow>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+const CLQ_LEVEL_OPTIONS: [string, string][] = [['low', 'Bajo nivel de claustrofobia'], ['moderate', 'Nivel moderado de claustrofobia'], ['high', 'Alto nivel de claustrofobia']];
+interface ClqPerson {
+  participantId: string;
+  person: { document: string; fullName: string };
+  date: string;
+  total: number;
+  max: number;
+  level: string | null;
+  markedAt: string | null;
+}
+
+/** Una fila del CLQ: la psicóloga marca la interpretación y, ya guardada, se habilita el PDF. */
+function ClqRow({ p, qs, onSaved, onError }: { p: ClqPerson; qs: (e?: string) => string; onSaved: () => void; onError: (m: string) => void }) {
+  const [level, setLevel] = useState(p.level ?? '');
+  const [busy, setBusy] = useState(false);
+  const dirty = level !== (p.level ?? '');
+  const save = async () => {
+    onError('');
+    setBusy(true);
+    try {
+      await api('PUT', `/api/participants/${p.participantId}/claustrofobia${qs()}`, { level });
+      onSaved();
+    } catch (e) {
+      onError(e instanceof ApiError ? e.message : 'No se pudo guardar la interpretación.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <tr>
+      <td>{p.person.document}</td>
+      <td>{p.person.fullName}</td>
+      <td><strong>{p.total}</strong> de {p.max}</td>
+      <td>
+        <fieldset className="plain" aria-label={`Interpretación del CLQ de ${p.person.fullName}`}>
+          {CLQ_LEVEL_OPTIONS.map(([k, label]) => (
+            <label key={k} className="check opt"><input type="radio" name={`clq-${p.participantId}`} checked={level === k} onChange={() => setLevel(k)} /> {label}</label>
+          ))}
+        </fieldset>
+      </td>
+      <td>{p.markedAt ? `Marcada el ${fmtDate(p.markedAt)}` : 'Pendiente'}</td>
+      <td className="actions">
+        <button className="btn" disabled={busy || !level || !dirty} onClick={() => void save()}>{busy ? 'Guardando…' : 'Guardar interpretación'}</button>{' '}
+        {p.level && !dirty ? <PdfButton url={`/api/participants/${p.participantId}/claustrofobia.pdf${qs()}`} name={`CLQ_${p.person.document}.pdf`} label="Descargar PDF" onError={onError} /> : <button className="btn secondary" disabled title="Guarda primero la interpretación">Descargar PDF</button>}
+      </td>
+    </tr>
+  );
+}
+
+/** Claustrofobia (CLQ): el formato no trae puntos de corte; la psicóloga marca el nivel y luego descarga el PDF. */
+function ClaustrofobiaView({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
+  const [tick, setTick] = useState(0);
+  const { data, error, loading } = useLoad<{ people: ClqPerson[] }>(`/api/campaigns/${campaignId}/claustrofobia${qs(`t=${tick}`)}`);
+  const [dlErr, setDlErr] = useState('');
+  if (loading && !data) return <Loading />;
+  if (error) return <div className="alert error" role="alert">{error}</div>;
+  const people = data?.people ?? [];
+  return (
+    <>
+      <p className="muted">El CLQ no trae puntos de corte: se muestra el puntaje total y la interpretación la marca la psicóloga. El PDF se habilita al guardarla.</p>
+      {dlErr && <div className="alert error" role="alert">{dlErr}</div>}
+      {people.length === 0 ? <p className="muted">Todavía nadie ha completado el CLQ.</p> : (
+        <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
+          <table className="table">
+            <caption className="sr-only">CLQ de Claustrofobia por persona</caption>
+            <thead><tr><th scope="col">Documento</th><th scope="col">Nombre</th><th scope="col">Puntaje total</th><th scope="col">Interpretación</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+            <tbody>
+              {people.map((p) => <ClqRow key={`${p.participantId}-${p.level}`} p={p} qs={qs} onSaved={() => setTick((t) => t + 1)} onError={setDlErr} />)}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 function Pf16View({ campaignId, qs }: { campaignId: string; qs: (e?: string) => string }) {
   const { data, error, loading } = useLoad<{ people: { participantId: string; person: { document: string; fullName: string }; date: string; answered: number; answers: string }[] }>(`/api/campaigns/${campaignId}/pf16${qs()}`);
   const [dlErr, setDlErr] = useState('');

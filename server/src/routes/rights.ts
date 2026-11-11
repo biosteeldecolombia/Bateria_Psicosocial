@@ -2,7 +2,7 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { instrumentsFor, normalizeDocument } from '@sanithelp/shared';
-import { campaigns, consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
+import { campaigns, consents, fichaAnswers, manualResults, participants, questionnaireAnswers } from '../db/schema.js';
 import { audit } from '../auth/service.js';
 import { manageableCampaign } from '../auth/access.js';
 import { verifyPassword } from '../security/passwords.js';
@@ -92,6 +92,8 @@ export const rightsRoutes: FastifyPluginAsync = async (app) => {
     if (!row) return reply.code(409).send({ error: 'La persona todavía no tiene respuestas en esa prueba.' });
     await db.transaction(async (tx) => {
       await tx.delete(questionnaireAnswers).where(and(eq(questionnaireAnswers.participantId, p.id), eq(questionnaireAnswers.instrument, body.data.instrument)));
+      // La interpretación manual del CLQ pertenece a las respuestas que se borran.
+      if (body.data.instrument === 'claustrofobia') await tx.delete(manualResults).where(and(eq(manualResults.participantId, p.id), eq(manualResults.instrument, 'claustrofobia')));
       if (p.status === 'completed') await tx.update(participants).set({ status: 'in_progress', submittedAt: null }).where(eq(participants.id, p.id));
     });
     await audit(db, actor.id, 'participant.instrument_reopened', { type: 'participant', id: p.id }, { instrument: body.data.instrument, reason: body.data.reason });

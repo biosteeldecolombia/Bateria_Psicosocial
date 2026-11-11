@@ -1,13 +1,14 @@
 import { inArray } from 'drizzle-orm';
 import { nameParts } from '../results/names.js';
 import { PDFDocument, StandardFonts, rgb, type PDFPage } from 'pdf-lib';
-import { consentAddendaFor, type FichaAnswers, type QuestionnaireId } from '@sanithelp/shared';
+import { consentAddendaFor, consentDocsFor, type ConsentDocId, type FichaAnswers, type QuestionnaireId } from '@sanithelp/shared';
 import type { Db } from '../db/client.js';
-import { campaigns, consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
+import { campaigns, companies, consents, fichaAnswers, participants, questionnaireAnswers } from '../db/schema.js';
 import type { Crypto } from '../security/crypto.js';
 import { consentInto } from './consent.js';
 import { fichaInto } from './ficha.js';
 import { questionnaireInto } from './questionnaires.js';
+import { occupationalConsentInto } from './ocupacionales.js';
 
 export interface ExpedienteData {
   participantId: string;
@@ -20,6 +21,9 @@ export interface ExpedienteData {
   ficha: { data: FichaAnswers; date: string } | null;
   /** Anexos del consentimiento de la campaña (evaluaciones individuales). */
   addenda: { title: string; paragraphs: string[] }[];
+  /** Documentos de consentimiento que aplican a la campaña y nombre de su empresa (para el consentimiento ocupacional). */
+  consentDocs: ConsentDocId[];
+  company: string;
   questionnaires: { id: QuestionnaireId; answers: Record<number, number>; gates: { clients?: boolean; boss?: boolean }; date: string }[];
 }
 
@@ -30,6 +34,7 @@ export async function loadExpedientes(db: Db, crypto: Crypto, ids: string[]): Pr
   if (!ids.length) return [];
   const parts = await db.select().from(participants).where(inArray(participants.id, ids));
   const campaignAssessments = new Map((await db.select({ id: campaigns.id, a: campaigns.assessments }).from(campaigns).where(inArray(campaigns.id, [...new Set(parts.map((p) => p.campaignId))]))).map((c) => [c.id, c.a]));
+  const companyNames = new Map((await db.select({ id: companies.id, name: companies.name }).from(companies).where(inArray(companies.id, [...new Set(parts.map((p) => p.companyId))]))).map((c) => [c.id, c.name]));
   const cons = new Map((await db.select().from(consents).where(inArray(consents.participantId, ids))).map((c) => [c.participantId, c]));
   const fich = new Map((await db.select().from(fichaAnswers).where(inArray(fichaAnswers.participantId, ids))).map((f) => [f.participantId, f]));
   const qs = new Map<string, (typeof questionnaireAnswers.$inferSelect)[]>();
@@ -40,7 +45,7 @@ export async function loadExpedientes(db: Db, crypto: Crypto, ids: string[]): Pr
   return parts.map((p) => {
     const c = cons.get(p.id);
     const f = fich.get(p.id);
-    const list = (qs.get(p.id) ?? []).filter((q) => !['disc', 'valanti', 'pf16'].includes(q.instrument)).sort((a, b) => order.indexOf(a.instrument as QuestionnaireId) - order.indexOf(b.instrument as QuestionnaireId));
+    const list = (qs.get(p.id) ?? []).filter((q) => !['disc', 'valanti', 'pf16', 'acrofobia', 'claustrofobia'].includes(q.instrument)).sort((a, b) => order.indexOf(a.instrument as QuestionnaireId) - order.indexOf(b.instrument as QuestionnaireId));
     return {
       participantId: p.id,
       document: crypto.decrypt(p.documentEnc),
@@ -49,6 +54,8 @@ export async function loadExpedientes(db: Db, crypto: Crypto, ids: string[]): Pr
       surnames: nameParts(crypto, p).surnames,
       status: p.status,
       consent: c ? { decision: c.decision, decidedAt: c.decidedAt, version: c.version, textHash: c.textHash, revokedAt: c.revokedAt } : null,
+      consentDocs: consentDocsFor(campaignAssessments.get(p.campaignId) ?? []).map((d) => d.id),
+      company: companyNames.get(p.companyId) ?? '',
       addenda: consentAddendaFor(campaignAssessments.get(p.campaignId) ?? []).map(({ title, paragraphs }) => ({ title, paragraphs })),
       ficha: f ? { data: JSON.parse(crypto.decrypt(f.dataEnc)) as FichaAnswers, date: iso(f.updatedAt) } : null,
       questionnaires: list.map((q) => {
@@ -65,6 +72,8 @@ export interface Professional {
   registry?: string;
   /** La profesional genera el documento con su sesión: se imprime la constancia de firma electrónica. */
   signed?: boolean;
+  /** Imagen de la firma de la psicóloga responsable de la campaña (PNG o JPEG). */
+  signature?: { bytes: Uint8Array; mime: 'image/png' | 'image/jpeg' };
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -77,7 +86,10 @@ const pad = (n: number) => String(n).padStart(2, '0');
 export async function buildExpediente(e: ExpedienteData, professional: Professional, generatedAt: Date): Promise<Uint8Array> {
   const out = await PDFDocument.create();
   if (e.consent) {
-    await consentInto(out, { names: e.names, surnames: e.surnames, document: e.document, decision: e.consent.decision, decidedAt: e.consent.decidedAt, version: e.consent.version, textHash: e.consent.textHash, revokedAt: e.consent.revokedAt, professional, signedAt: generatedAt, addenda: e.addenda });
+    const base = { names: e.names, surnames: e.surnames, document: e.document, decision: e.consent.decision, decidedAt: e.consent.decidedAt, version: e.consent.version, textHash: e.consent.textHash, revokedAt: e.consent.revokedAt, professional, signedAt: generatedAt };
+    // Cada documento que aplica a la campaña se imprime tal cual lo vio la persona (la decisión es una sola para todos).
+    if (e.consentDocs.includes('psychosocial')) await consentInto(out, { ...base, addenda: e.addenda });
+    if (e.consentDocs.includes('occupational')) await occupationalConsentInto(out, { ...base, company: e.company });
   }
   if (e.consent?.decision === 'authorized') {
     if (e.ficha) await fichaInto(out, { data: e.ficha.data, date: e.ficha.date, document: e.document });

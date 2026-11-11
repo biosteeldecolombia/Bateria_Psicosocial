@@ -34,6 +34,8 @@ export const campaigns = pgTable('campaigns', {
   closedAt: timestamp('closed_at', { withTimezone: true }),
   /** Contraseña de la credencial compartida, cifrada, para que la psicóloga asignada (o un admin) la consulte. Null en campañas antiguas hasta regenerarla. */
   accessPasswordEnc: text('access_password_enc'),
+  /** Psicóloga responsable de la campaña: sus datos y su firma salen en los documentos. Null = la asignada a la empresa. */
+  responsibleUserId: uuid('responsible_user_id'),
 });
 
 export const users = pgTable(
@@ -47,6 +49,8 @@ export const users = pgTable(
     fullNameEnc: text('full_name_enc').notNull(),
     professionalRegistryEnc: text('professional_registry_enc'),
     professionalDocumentEnc: text('professional_document_enc'),
+    /** Imagen de la firma de la psicóloga (JSON cifrado: tipo y base64). Se imprime en los documentos de sus campañas. */
+    signatureEnc: text('signature_enc'),
     companyId: uuid('company_id').references(() => companies.id),
     /** Solo para la credencial compartida (role = collaborator): la campaña a la que da acceso. */
     campaignId: uuid('campaign_id').references(() => campaigns.id),
@@ -131,6 +135,19 @@ export const questionnaireAnswers = pgTable(
     instrument: text('instrument').notNull(),
     dataEnc: text('data_enc').notNull(),
     complete: boolean('complete').notNull().default(false),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.participantId, t.instrument] })],
+);
+
+/** Resultado que marca la psicóloga a mano para una evaluación sin baremo (hoy, la interpretación del CLQ). JSON cifrado. */
+export const manualResults = pgTable(
+  'manual_results',
+  {
+    participantId: uuid('participant_id').notNull().references(() => participants.id),
+    instrument: text('instrument').notNull(),
+    dataEnc: text('data_enc').notNull(),
+    updatedBy: uuid('updated_by'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.participantId, t.instrument] })],

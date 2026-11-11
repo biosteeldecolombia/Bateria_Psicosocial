@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
-import { CONSENT_BLOCKS, CONSENT_DATE, CONSENT_DECISION_LEAD, CONSENT_OPTIONS, CONSENT_TITLE, CONSENT_VERSION } from '@sanithelp/shared';
+import type { ConsentBlock } from '@sanithelp/shared';
 import { api, ApiError } from '../api';
 import type { FlowState } from './Flow';
 
 interface ConsentInfo {
   version: string;
+  date: string;
   hash: string;
+  /** Documentos que aplican a la campaña (batería psicosocial y/o evaluación ocupacional) y opciones de decisión. */
+  docs: { id: string; title: string; blocks: ConsentBlock[] }[];
+  options: { lead: string; authorize: string; decline: string };
+  company: string;
   addenda: { id: string; title: string; paragraphs: string[] }[];
   fullName: string;
   document: string;
@@ -24,7 +29,7 @@ export function Consent({ onDone }: { onDone: (s: FlowState) => void }) {
   const today = new Date().toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const submit = async () => {
     if (!info || !choice) return;
-    if (choice === 'declined' && !window.confirm('Si no autorizas, no podrás responder la batería. ¿Confirmas tu decisión?')) return;
+    if (choice === 'declined' && !window.confirm('Si no autorizas, no podrás responder las pruebas. ¿Confirmas tu decisión?')) return;
     setBusy(true);
     setError('');
     try {
@@ -39,7 +44,7 @@ export function Consent({ onDone }: { onDone: (s: FlowState) => void }) {
   return (
     <section className="card" aria-labelledby="t">
       <h1 id="t">Consentimiento informado</h1>
-      <p className="muted">Código {CONSENT_VERSION} · Versión vigente al {CONSENT_DATE}. Lee el documento completo antes de decidir.</p>
+      <p className="muted">{info ? `Código ${info.version} · Versión vigente al ${info.date}.` : ''} Lee el documento completo antes de decidir.</p>
       {info && (
         <dl className="idbox">
           <div><dt>Fecha de diligenciamiento</dt><dd>{today}</dd></div>
@@ -48,10 +53,15 @@ export function Consent({ onDone }: { onDone: (s: FlowState) => void }) {
         </dl>
       )}
       <div className="doc" role="region" aria-label="Texto del consentimiento informado" tabIndex={0}>
-        <p><strong>{CONSENT_TITLE}</strong></p>
-        {CONSENT_BLOCKS.map((b, i) =>
-          b.kind === 'h' ? <h2 key={i}>{b.text}</h2> : b.kind === 'li' ? <ul key={i}><li>{b.text}</li></ul> : <p key={i}>{b.text}</p>,
-        )}
+        {info?.docs.map((d) => (
+          <div key={d.id}>
+            <p><strong>{d.title}</strong></p>
+            {d.blocks.map((b, i) => {
+              const text = b.text.replace('{empresa}', info.company || '________________');
+              return b.kind === 'h' ? <h2 key={i}>{text}</h2> : b.kind === 'li' ? <ul key={i}><li>{text}</li></ul> : <p key={i}>{text}</p>;
+            })}
+          </div>
+        ))}
         {info?.addenda.map((a) => (
           <div key={a.id}>
             <h2>{a.title}</h2>
@@ -60,9 +70,9 @@ export function Consent({ onDone }: { onDone: (s: FlowState) => void }) {
         ))}
       </div>
       <fieldset className="plain">
-        <legend><strong>{CONSENT_DECISION_LEAD}</strong></legend>
-        <label className="check opt"><input type="radio" name="consent" checked={choice === 'authorized'} onChange={() => setChoice('authorized')} /> {CONSENT_OPTIONS.authorize}</label>
-        <label className="check opt"><input type="radio" name="consent" checked={choice === 'declined'} onChange={() => setChoice('declined')} /> {CONSENT_OPTIONS.decline}</label>
+        <legend><strong>{info?.options.lead ?? 'Manifiesto que:'}</strong></legend>
+        <label className="check opt"><input type="radio" name="consent" checked={choice === 'authorized'} onChange={() => setChoice('authorized')} disabled={!info} /> {info?.options.authorize}</label>
+        <label className="check opt"><input type="radio" name="consent" checked={choice === 'declined'} onChange={() => setChoice('declined')} disabled={!info} /> {info?.options.decline}</label>
       </fieldset>
       <p className="hint">Puedes revocar tu consentimiento en cualquier momento informando tu decisión al profesional responsable del proceso.</p>
       {error && <div className="alert error" role="alert">{error}</div>}

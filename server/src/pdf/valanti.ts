@@ -3,6 +3,7 @@ import { VALANTI_PAIRS, VALANTI_VALUES } from '@sanithelp/shared';
 import { VALANTI_NORM, VALANTI_NORM_LABEL } from '@sanithelp/scoring';
 import type { ValantiRecord } from '../results/valanti.js';
 import type { Professional } from './expediente.js';
+import { SIGNATURE_BLOCK_H, drawSignatureBlock } from './firma.js';
 
 const INK = rgb(0.1, 0.18, 0.26);
 const MUTED = rgb(0.35, 0.42, 0.47);
@@ -146,6 +147,8 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
     pg.drawText(safe(`${i + 1}. ${a === undefined ? '— · —' : `${a} · ${3 - a}`}`), { x: M + col * colW, y: yy, size: 8.5, font, color: INK });
   });
 
+  ensure(SIGNATURE_BLOCK_H + 10);
+  await drawSignatureBlock(doc, pg, professional, y, M, font);
   const pro = [professional.name && `Profesional responsable: ${professional.name}`, professional.document && `Documento: ${professional.document}`, professional.registry && `Registro profesional: ${professional.registry}`].filter(Boolean).join(' · ');
   const stamp = `Confidencial — uso exclusivo del profesional responsable · Generado el ${pad(generatedAt.getDate())}/${pad(generatedAt.getMonth() + 1)}/${generatedAt.getFullYear()} ${pad(generatedAt.getHours())}:${pad(generatedAt.getMinutes())}`;
   for (const p of pages) {

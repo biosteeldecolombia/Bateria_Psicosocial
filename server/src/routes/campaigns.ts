@@ -56,11 +56,13 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       stats.set(r.id, s);
     }
     const names = new Map((await db.select({ id: companies.id, name: companies.name }).from(companies)).map((c) => [c.id, c.name]));
+    const respIds = [...new Set(rows.map((c) => c.responsibleUserId).filter((x): x is string => !!x))];
+    const respNames = new Map((respIds.length ? await db.select({ id: users.id, n: users.fullNameEnc }).from(users).where(inArray(users.id, respIds)) : []).map((u) => [u.id, crypto.decrypt(u.n)]));
     const out = [];
     for (const c of rows) {
       const u = await accessUserOf(c.id);
       const st = stats.get(c.id) ?? { started: 0, completed: 0, inProgress: 0, declined: 0, revoked: 0 };
-      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
+      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', responsibleName: c.responsibleUserId ? respNames.get(c.responsibleUserId) ?? null : null, accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
     }
     return out;
   });
@@ -88,7 +90,8 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     if (!username) return reply.code(500).send({ error: 'No se pudo generar un usuario único. Intenta de nuevo.' });
 
     const password = generateTempPassword(10);
-    const [campaign] = await db.insert(campaigns).values({ companyId: company.id, name: body.data.name, assessments: [...new Set(body.data.assessments)], accessPasswordEnc: crypto.encrypt(password) }).returning();
+    // La psicóloga que crea la campaña es su responsable; si la crea un administrador, queda la asignada a la empresa (o la que elija después).
+    const [campaign] = await db.insert(campaigns).values({ responsibleUserId: actor.role === 'psychologist' ? actor.id : null, companyId: company.id, name: body.data.name, assessments: [...new Set(body.data.assessments)], accessPasswordEnc: crypto.encrypt(password) }).returning();
     await db.insert(users).values({
       role: 'collaborator',
       usernameBlind: crypto.blindIndex(username),
@@ -151,9 +154,35 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     const actor = req.auth!.user;
     const c = uuidParam(id) && body.success ? await manageable(id, actor.id, actor.role) : null;
     if (!c || !body.success) return reply.code(404).send({ error: 'Campaña no encontrada' });
-    await db.update(campaigns).set({ name: body.data.name }).where(eq(campaigns.id, c.id));
-    await audit(db, actor.id, 'campaign.renamed', { type: 'campaign', id: c.id });
+    if (body.data.responsibleId !== undefined && body.data.responsibleId !== null) {
+      const ok = (await responsiblesOf(c.companyId)).some((r) => r.id === body.data.responsibleId);
+      if (!ok) return reply.code(400).send({ error: 'Esa persona no es una psicóloga activa asignada a la empresa de la campaña.' });
+    }
+    await db
+      .update(campaigns)
+      .set({ ...(body.data.name !== undefined ? { name: body.data.name } : {}), ...(body.data.responsibleId !== undefined ? { responsibleUserId: body.data.responsibleId } : {}) })
+      .where(eq(campaigns.id, c.id));
+    if (body.data.name !== undefined) await audit(db, actor.id, 'campaign.renamed', { type: 'campaign', id: c.id });
+    if (body.data.responsibleId !== undefined) await audit(db, actor.id, 'campaign.responsible_changed', { type: 'campaign', id: c.id }, { responsibleId: body.data.responsibleId });
     return { ok: true };
+  });
+
+  /** Psicólogas activas asignadas a la empresa: candidatas a responsable de la campaña. */
+  async function responsiblesOf(companyId: string) {
+    const rows = await db
+      .select({ u: users })
+      .from(psychologistCompanies)
+      .innerJoin(users, eq(users.id, psychologistCompanies.userId))
+      .where(and(eq(psychologistCompanies.companyId, companyId), eq(users.active, true), eq(users.role, 'psychologist')));
+    return rows.map((r) => ({ id: r.u.id, name: crypto.decrypt(r.u.fullNameEnc), hasSignature: !!r.u.signatureEnc }));
+  }
+
+  app.get('/campaigns/:id/responsibles', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const actor = req.auth!.user;
+    const c = uuidParam(id) ? await manageable(id, actor.id, actor.role) : null;
+    if (!c) return reply.code(404).send({ error: 'Campaña no encontrada' });
+    return { responsibleId: c.responsibleUserId, options: await responsiblesOf(c.companyId) };
   });
 
   /**

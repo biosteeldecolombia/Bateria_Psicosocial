@@ -14,6 +14,8 @@ import { buildDiscReport } from '../pdf/disc.js';
 import { loadDisc } from '../results/disc.js';
 import { buildValantiReport } from '../pdf/valanti.js';
 import { loadValanti } from '../results/valanti.js';
+import { loadAcrofobia, loadClq } from '../results/ocupacionales.js';
+import { buildAcrofobiaReport, buildClqReport } from '../pdf/ocupacionales.js';
 import { buildPf16Sheet } from '../pdf/pf16.js';
 import { loadIndividual } from '../results/individual.js';
 
@@ -32,9 +34,18 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
   const staff = app.requireReady('admin', 'psychologist');
   fs.mkdirSync(EXPORT_DIR, { recursive: true });
 
-  /** Datos de la profesional para la declaración del consentimiento: quien genera (si es psicóloga) o la asignada a la empresa. */
-  async function professionalFor(actor: typeof users.$inferSelect, companyId: string): Promise<Professional> {
-    let u: typeof users.$inferSelect | undefined = actor.role === 'psychologist' ? actor : undefined;
+  /**
+   * Datos de la profesional para el consentimiento y los informes: la responsable de la campaña (con su firma);
+   * si la campaña no tiene, quien genera (si es psicóloga) o la asignada a la empresa.
+   */
+  async function professionalFor(actor: typeof users.$inferSelect, campaign: { companyId: string; responsibleUserId: string | null }): Promise<Professional> {
+    const companyId = campaign.companyId;
+    let u: typeof users.$inferSelect | undefined;
+    if (campaign.responsibleUserId) {
+      const [r] = await db.select().from(users).where(and(eq(users.id, campaign.responsibleUserId), eq(users.active, true))).limit(1);
+      u = r;
+    }
+    if (!u && actor.role === 'psychologist') u = actor;
     if (!u) {
       const rows = await db
         .select({ u: users })
@@ -50,18 +61,20 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!u.professionalDocumentEnc || !u.professionalRegistryEnc) {
       throw Object.assign(new Error('La psicóloga responsable debe completar su documento y su registro profesional en «Mi perfil» antes de generar el expediente (aparecen en el consentimiento).'), { statusCode: 409 });
     }
+    const sig = u.signatureEnc ? (JSON.parse(crypto.decrypt(u.signatureEnc)) as { mime: 'image/png' | 'image/jpeg'; b64: string }) : null;
     return {
       name: crypto.decrypt(u.fullNameEnc),
       document: u.professionalDocumentEnc ? crypto.decrypt(u.professionalDocumentEnc) : undefined,
       registry: u.professionalRegistryEnc ? crypto.decrypt(u.professionalRegistryEnc) : undefined,
       signed: u.id === actor.id,
+      signature: sig ? { bytes: Buffer.from(sig.b64, 'base64'), mime: sig.mime } : undefined,
     };
   }
 
   /** Para los informes de las evaluaciones individuales: el dato profesional es solo el pie de página, no debe impedir el informe. */
-  async function professionalOptional(actor: typeof users.$inferSelect, companyId: string): Promise<Professional> {
+  async function professionalOptional(actor: typeof users.$inferSelect, campaign: { companyId: string; responsibleUserId: string | null }): Promise<Professional> {
     try {
-      return await professionalFor(actor, companyId);
+      return await professionalFor(actor, campaign);
     } catch (e) {
       if ((e as { statusCode?: number }).statusCode === 409) return actor.role === 'psychologist' ? { name: crypto.decrypt(actor.fullNameEnc), signed: false } : {};
       throw e;
@@ -76,7 +89,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     const c = await clinicalAccess(db, req, reply, p.campaignId);
     if (!c) return;
     const [data] = await loadExpedientes(db, crypto, [id]);
-    const bytes = await buildExpediente(data!, await professionalFor(req.auth!.user, p.companyId), new Date());
+    const bytes = await buildExpediente(data!, await professionalFor(req.auth!.user, c), new Date());
     await audit(db, req.auth!.user.id, 'pdf.individual', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -93,7 +106,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadDisc(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados DISC.' });
-    const bytes = await buildDiscReport(rec, await professionalOptional(req.auth!.user, p.companyId), new Date());
+    const bytes = await buildDiscReport(rec, await professionalOptional(req.auth!.user, c), new Date());
     await audit(db, req.auth!.user.id, 'pdf.disc', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -110,11 +123,46 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadValanti(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados VALANTI.' });
-    const bytes = await buildValantiReport(rec, await professionalOptional(req.auth!.user, p.companyId), new Date());
+    const bytes = await buildValantiReport(rec, await professionalOptional(req.auth!.user, c), new Date());
     await audit(db, req.auth!.user.id, 'pdf.valanti', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
       .header('Content-Disposition', `attachment; filename="VALANTI_${rec.document}.pdf"`)
+      .send(Buffer.from(bytes));
+  });
+
+  /** Informe de la Acrofobia de Cohen en PDF. */
+  app.get('/participants/:id/acrofobia.pdf', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const c = await clinicalAccess(db, req, reply, p.campaignId);
+    if (!c) return;
+    const [rec] = await loadAcrofobia(db, crypto, c.id, id);
+    if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados de Acrofobia.' });
+    const bytes = await buildAcrofobiaReport(rec, await professionalOptional(req.auth!.user, c), new Date());
+    await audit(db, req.auth!.user.id, 'pdf.acrofobia', { type: 'participant', id });
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="Acrofobia_${rec.document}.pdf"`)
+      .send(Buffer.from(bytes));
+  });
+
+  /** Hoja del CLQ en PDF: solo cuando la psicóloga ya marcó la interpretación. */
+  app.get('/participants/:id/claustrofobia.pdf', { preHandler: staff }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const c = await clinicalAccess(db, req, reply, p.campaignId);
+    if (!c) return;
+    const [rec] = await loadClq(db, crypto, c.id, id);
+    if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene el CLQ completo.' });
+    if (!rec.level) return reply.code(409).send({ error: 'Marca primero la interpretación del CLQ (bajo, moderado o alto) para descargar el PDF.' });
+    const bytes = await buildClqReport(rec, await professionalOptional(req.auth!.user, c), new Date());
+    await audit(db, req.auth!.user.id, 'pdf.claustrofobia', { type: 'participant', id });
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `attachment; filename="CLQ_${rec.document}.pdf"`)
       .send(Buffer.from(bytes));
   });
 
@@ -127,7 +175,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadIndividual(db, crypto, c.id, 'pf16', id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no completó el 16PF.' });
-    const bytes = await buildPf16Sheet(rec, await professionalOptional(req.auth!.user, p.companyId), new Date());
+    const bytes = await buildPf16Sheet(rec, await professionalOptional(req.auth!.user, c), new Date());
     await audit(db, req.auth!.user.id, 'pdf.pf16', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -158,7 +206,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
         rows = rows.filter((r) => keep.has(r.id));
       }
       await db.update(exportJobs).set({ total: rows.length }).where(eq(exportJobs.id, jobId));
-      const professional = await professionalFor(actor!, camp!.companyId);
+      const professional = await professionalFor(actor!, camp!);
 
       const out = fs.createWriteStream(file);
       const zip = new ZipArchive({ zlib: { level: 1 } });
