@@ -16,9 +16,9 @@ const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-
  */
 export const campaignRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
-  const staff = app.requireReady('admin', 'psychologist');
-  // El auxiliar administrativo solo consulta el listado de las campañas que se le asignaron.
-  const staffOrAssistant = app.requireReady('admin', 'psychologist', 'assistant');
+  // El auxiliar administrativo tiene en campañas lo mismo que la psicóloga (acotado a lo que se le asignó: ver `manageableCampaign`).
+  const staff = app.requireReady('admin', 'psychologist', 'assistant');
+  const staffOrAssistant = staff;
 
   const allowedCompanyIds = (userId: string, role: string) => allowedIds(db, userId, role);
 
@@ -62,7 +62,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     for (const c of rows) {
       const u = await accessUserOf(c.id);
       const st = stats.get(c.id) ?? { started: 0, completed: 0, inProgress: 0, declined: 0, revoked: 0 };
-      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', responsibleName: c.responsibleUserId ? respNames.get(c.responsibleUserId) ?? null : null, accessUsername: u && actor.role !== 'assistant' ? crypto.decrypt(u.usernameEnc) : null });
+      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', responsibleName: c.responsibleUserId ? respNames.get(c.responsibleUserId) ?? null : null, accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
     }
     return out;
   });

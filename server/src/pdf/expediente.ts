@@ -23,6 +23,8 @@ export interface ExpedienteData {
   addenda: { title: string; paragraphs: string[] }[];
   /** Documentos de consentimiento que aplican a la campaña y nombre de su empresa (para el consentimiento ocupacional). */
   consentDocs: ConsentDocId[];
+  /** Evaluaciones de la campaña (el título del expediente depende de ellas). */
+  assessments: string[];
   company: string;
   questionnaires: { id: QuestionnaireId; answers: Record<number, number>; gates: { clients?: boolean; boss?: boolean }; date: string }[];
 }
@@ -55,6 +57,7 @@ export async function loadExpedientes(db: Db, crypto: Crypto, ids: string[]): Pr
       status: p.status,
       consent: c ? { decision: c.decision, decidedAt: c.decidedAt, version: c.version, textHash: c.textHash, revokedAt: c.revokedAt } : null,
       consentDocs: consentDocsFor(campaignAssessments.get(p.campaignId) ?? []).map((d) => d.id),
+      assessments: [...(campaignAssessments.get(p.campaignId) ?? [])],
       company: companyNames.get(p.companyId) ?? '',
       addenda: consentAddendaFor(campaignAssessments.get(p.campaignId) ?? []).map(({ title, paragraphs }) => ({ title, paragraphs })),
       ficha: f ? { data: JSON.parse(crypto.decrypt(f.dataEnc)) as FichaAnswers, date: iso(f.updatedAt) } : null,
@@ -110,7 +113,8 @@ export async function buildExpediente(e: ExpedienteData, professional: Professio
     if (pro) label(pg, pro, 19);
     label(pg, stamp, 7);
   }
-  out.setTitle('Expediente de respuestas — Batería de riesgo psicosocial');
+  // El título sigue a la campaña: solo las de batería psicosocial se titulan así.
+  out.setTitle(e.assessments.includes('psychosocial') ?'Expediente de respuestas — Batería de riesgo psicosocial' : 'Expediente de consentimiento y ficha — Evaluación psicológica ocupacional');
   out.setProducer('Sanithelp');
   return out.save();
 }

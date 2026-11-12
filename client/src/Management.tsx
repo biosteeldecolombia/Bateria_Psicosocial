@@ -24,6 +24,8 @@ function CampaignStats({ s }: { s: Campaign['stats'] }) {
 }
 
 type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'auditoria' | 'perfil';
+/** Aviso de formatos de evaluación por campaña: pendientes (psicóloga) o listos para descargar (auxiliar). */
+interface FormatoNote { campaignId: string; campaignName: string; companyName: string; kind: 'alturas' | 'confinados'; count: number }
 
 /** Firma de la psicóloga: se imprime en los documentos de las campañas de las que es responsable. */
 function SignatureCard() {
@@ -283,13 +285,15 @@ function CampaignForm({ companies, initialCompany, onDone, onSecret, onClose }: 
 
 export function Management({ me }: { me: MeResponse }) {
   const isAdmin = me.role === 'admin';
-  // Auxiliar administrativo: solo ve las campañas que se le asignaron para descargar documentos.
+  // Auxiliar administrativo: lo mismo que la psicóloga sobre lo que se le asignó (empresas y campañas), salvo diligenciar los formatos
+  // de evaluación y el perfil profesional.
   const isAssistant = me.role === 'assistant';
-  const tabs: { key: TabKey; label: string; icon: IconName }[] = isAssistant ? [{ key: 'campanas', label: 'Campañas', icon: 'clipboard' }] : [
+  const isPsychologist = me.role === 'psychologist';
+  const tabs: { key: TabKey; label: string; icon: IconName }[] = [
     { key: 'inicio', label: 'Inicio', icon: 'home' },
     { key: 'empresas', label: 'Empresas', icon: 'building' },
     { key: 'campanas', label: 'Campañas', icon: 'clipboard' },
-    ...(isAdmin ? [{ key: 'usuarios' as const, label: 'Usuarios', icon: 'users' as const }, { key: 'auditoria' as const, label: 'Auditoría', icon: 'shield' as const }] : [{ key: 'perfil' as const, label: 'Mi perfil', icon: 'user' as const }]),
+    ...(isAdmin ? [{ key: 'usuarios' as const, label: 'Usuarios', icon: 'users' as const }, { key: 'auditoria' as const, label: 'Auditoría', icon: 'shield' as const }] : isPsychologist ? [{ key: 'perfil' as const, label: 'Mi perfil', icon: 'user' as const }] : []),
   ];
   const fromHash = (): TabKey => {
     const h = window.location.hash.replace('#/', '') as TabKey;
@@ -306,6 +310,8 @@ export function Management({ me }: { me: MeResponse }) {
   const [analysis, setAnalysis] = useState<Campaign | null>(null);
   const [consentView, setConsentView] = useState<Campaign | null>(null);
   const [profileDone, setProfileDone] = useState(true);
+  // Avisos de formatos de evaluación: pendientes (psicóloga) o listos para descargar (auxiliar)
+  const [notes, setNotes] = useState<FormatoNote[]>([]);
   const [newCompany, setNewCompany] = useState(false);
   const [newCampaign, setNewCampaign] = useState(false);
   const [newUser, setNewUser] = useState(false);
@@ -342,16 +348,31 @@ export function Management({ me }: { me: MeResponse }) {
     setUsersLoaded(true);
   }, [isAdmin]);
   const checkProfile = useCallback(() => {
-    if (me.role !== 'psychologist') return;
+    if (!isPsychologist) return;
     api<{ professionalDocument: string; professionalRegistry: string }>('GET', '/api/profile')
       .then((r) => setProfileDone(!!r.professionalDocument && !!r.professionalRegistry))
       .catch(() => undefined);
-  }, [me.role]);
+  }, [isPsychologist]);
+  const loadNotes = useCallback(() => {
+    if (!isPsychologist && !isAssistant) return;
+    api<{ pending: FormatoNote[]; ready: FormatoNote[] }>('GET', '/api/notifications/formatos')
+      .then((r) => setNotes(isAssistant ? r.ready : r.pending))
+      .catch(() => undefined);
+  }, [isPsychologist, isAssistant]);
   useEffect(() => {
     void load().catch(() => setLoaded(true));
     void loadUsers().catch(() => setUsersLoaded(true));
     checkProfile();
-  }, [load, loadUsers, checkProfile]);
+    loadNotes();
+  }, [load, loadUsers, checkProfile, loadNotes]);
+  // Se actualizan al cambiar de sección y cada par de minutos (la psicóloga guarda formatos mientras la auxiliar trabaja)
+  useEffect(() => { loadNotes(); }, [tab, analysis, loadNotes]);
+  useEffect(() => {
+    const t = setInterval(loadNotes, 120_000);
+    return () => clearInterval(t);
+  }, [loadNotes]);
+  const notesTotal = notes.reduce((n, x) => n + x.count, 0);
+  const noteOf = (campaignId: string) => notes.filter((x) => x.campaignId === campaignId).reduce((n, x) => n + x.count, 0);
 
   const goCampaigns = (companyId = '') => { setCoFilter(companyId); setStFilter(''); setTab('campanas'); };
   const activeCompanies = companies.filter((c) => c.active);
@@ -382,11 +403,12 @@ export function Management({ me }: { me: MeResponse }) {
             <button key={t.key} role="tab" id={`tab-${t.key}`} aria-selected={tab === t.key} aria-controls="staff-panel" tabIndex={tab === t.key ? 0 : -1} className={tab === t.key ? 'on' : ''} onClick={() => setTab(t.key)}>
               <Icon name={t.icon} /> {t.label}
               {t.key === 'perfil' && !profileDone && <span className="dot-alert" role="img" aria-label="Pendiente" />}
+              {t.key === 'campanas' && notesTotal > 0 && <span className="chip" style={{ marginLeft: 6 }} role="img" aria-label={`${notesTotal} ${isAssistant ? 'formatos listos para descargar' : 'formatos pendientes'}`}>{notesTotal}</span>}
             </button>
           ))}
         </div>
         {tab === 'empresas' && isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Nueva empresa</button>}
-        {tab === 'campanas' && !analysis && !isAssistant && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}
+        {tab === 'campanas' && !analysis && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}
         {tab === 'usuarios' && <button className="btn" onClick={() => setNewUser(true)}><Icon name="plus" /> Nueva cuenta</button>}
       </nav>
 
@@ -396,10 +418,28 @@ export function Management({ me }: { me: MeResponse }) {
         {tab === 'inicio' && (
           <>
             <PageHero as="h1" title={`Hola, ${me.fullName}`} lead="Resumen de tu operación. Haz clic en una tarjeta para ver el detalle." />
-            {me.role === 'psychologist' && !profileDone && (
+            {isPsychologist && !profileDone && (
               <div className="alert error banner" role="status">
                 <span>Completa tu perfil profesional para poder descargar expedientes en PDF.</span>
                 <button className="btn secondary sm" onClick={() => setTab('perfil')}>Completar perfil <Icon name="arrow" /></button>
+              </div>
+            )}
+            {notesTotal > 0 && (
+              <div className="alert ok banner" role="status">
+                <span>
+                  {isAssistant
+                    ? <><strong>{notesTotal}</strong> {notesTotal === 1 ? 'formato ya está disponible' : 'formatos ya están disponibles'} para descarga.</>
+                    : <>Tienes <strong>{notesTotal}</strong> {notesTotal === 1 ? 'formato de evaluación pendiente' : 'formatos de evaluación pendientes'} por diligenciar.</>}
+                </span>
+                <ul className="list" style={{ margin: '0.5rem 0 0' }}>
+                  {notes.map((n) => (
+                    <li key={`${n.campaignId}|${n.kind}`}>
+                      <button className="btn secondary sm" onClick={() => { const c = campaigns.find((x) => x.id === n.campaignId); if (c) { setTab('campanas'); setAnalysis(c); } }}>
+                        {n.companyName} · {n.campaignName} — {n.count} · {n.kind === 'alturas' ? 'Trabajo en alturas' : 'Espacios confinados'} <Icon name="arrow" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             <div className="kpi-grid">
@@ -521,7 +561,7 @@ export function Management({ me }: { me: MeResponse }) {
         {tab === 'campanas' && (analysis ? (
           <>
             <button className="btn secondary sm" style={{ marginBottom: '0.75rem' }} onClick={() => setAnalysis(null)}><Icon name="back" /> Volver a campañas</button>
-            <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} assessments={analysis.assessments} isAdmin={isAdmin || isAssistant} limited={isAssistant} onClose={() => setAnalysis(null)} />
+            <Analysis key={analysis.id} campaignId={analysis.id} campaignName={`${analysis.companyName} · ${analysis.name}`} assessments={analysis.assessments} isAdmin={isAdmin || isAssistant} canFill={!isAssistant} onClose={() => setAnalysis(null)} />
           </>
         ) : (
           <>
@@ -547,12 +587,12 @@ export function Management({ me }: { me: MeResponse }) {
               </div>
             </div>
             {!loaded ? <Loading /> : shownCampaigns.length === 0 ? (
-              <EmptyState icon="clipboard" text={isAssistant ? 'No tienes campañas asignadas. Pídele al administrador que te asigne empresas o campañas.' : 'No hay campañas que coincidan.'}>{companies.length > 0 && !isAssistant && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}</EmptyState>
+              <EmptyState icon="clipboard" text={isAssistant && campaigns.length === 0 ? 'No tienes campañas asignadas. Pídele al administrador que te asigne empresas o campañas.' : 'No hay campañas que coincidan.'}>{companies.length > 0 && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}</EmptyState>
             ) : (
               <div className="panel table-wrap">
                 <table className="table">
                   <caption className="sr-only">Campañas y su credencial de acceso</caption>
-                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Evaluaciones</th>{!isAssistant && <th scope="col">Usuario de acceso</th>}<th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Evaluaciones</th><th scope="col">Usuario de acceso</th><th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
                   <tbody>
                     {shownCampaigns.map((c) => (
                       <tr key={c.id}>
@@ -563,19 +603,16 @@ export function Management({ me }: { me: MeResponse }) {
                           <div className="muted"><small>Responsable: {c.responsibleName ?? 'la asignada a la empresa'}</small></div>
                           <div className="muted"><small>Consentimiento: {consentDocsFor(c.assessments).map((d) => d.label).join(' + ')}</small> <button type="button" className="btn secondary sm" onClick={() => setConsentView(c)}>Ver</button></div>
                         </td>
-                        {!isAssistant && <td><code>{c.accessUsername}</code></td>}
+                        <td><code>{c.accessUsername}</code></td>
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
                         <td className="actions">
-                          {!isAssistant && (
                           <button className="icon-btn" title="Ver usuario y contraseña" aria-label={`Ver usuario y contraseña de ${c.name}`} onClick={() => void act.run(async () => {
                             const r = await api<{ username: string; password: string | null }>('GET', `/api/campaigns/${c.id}/access`);
                             if (r.password === null) window.alert('Esta campaña es anterior a esta función y su contraseña no quedó guardada. Usa «Nueva contraseña de acceso» en el menú para generar una que sí se pueda consultar.');
                             else setSecret({ title: `Acceso de ${c.name}`, username: r.username, password: r.password, view: true });
                           })}><Icon name="lock" /></button>
-                          )}
-                          <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> {isAssistant ? 'Documentos' : 'Resultados'}</button>
-                          {!isAssistant && (
+                          <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> Resultados{noteOf(c.id) > 0 && <span className="chip" style={{ marginLeft: 6 }} title={isAssistant ? 'Formatos listos para descargar' : 'Formatos pendientes por diligenciar'}>{noteOf(c.id)}</span>}</button>
                           <RowMenu
                             label={`Más acciones para ${c.name}`}
                             items={[
@@ -596,7 +633,6 @@ export function Management({ me }: { me: MeResponse }) {
                               { label: 'Eliminar campaña', icon: 'trash', danger: true, onSelect: () => setDelCampaign(c) },
                             ]}
                           />
-                          )}
                         </td>
                       </tr>
                     ))}

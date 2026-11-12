@@ -212,6 +212,51 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ---------- Masiva ----------
+  /**
+   * Documentos de las evaluaciones distintas a la batería psicosocial, por persona. Los formatos solo salen si la psicóloga ya
+   * los diligenció (y el CLQ si ya marcó la interpretación); lo que falta se anota en `pending`.
+   */
+  async function extraDocsFor(camp: typeof campaigns.$inferSelect, ids: string[], professional: Professional, generatedAt: Date) {
+    type Doc = { name: string; bytes: Uint8Array };
+    const kinds = camp.assessments.filter((a) => a !== 'psychosocial');
+    const by = new Map<string, { docs: Doc[]; pending: string[] }>();
+    const result = { enabled: kinds.length > 0, get: (id: string) => by.get(id) };
+    if (!result.enabled || !ids.length) return result;
+    const entry = (id: string) => {
+      let e = by.get(id);
+      if (!e) by.set(id, (e = { docs: [], pending: [] }));
+      return e;
+    };
+    const wanted = new Set(ids);
+    if (kinds.includes('disc')) for (const r of await loadDisc(db, crypto, camp.id)) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Informe_DISC_${r.document}.pdf`, bytes: await buildDiscReport(r, professional, generatedAt) });
+    if (kinds.includes('valanti')) for (const r of await loadValanti(db, crypto, camp.id)) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Informe_VALANTI_${r.document}.pdf`, bytes: await buildValantiReport(r, professional, generatedAt) });
+    if (kinds.includes('pf16')) for (const r of await loadIndividual(db, crypto, camp.id, 'pf16')) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Hoja_16PF_${r.document}.pdf`, bytes: await buildPf16Sheet(r, professional, generatedAt) });
+    const parts = kinds.some((k) => k === 'acrofobia' || k === 'claustrofobia') ? await db.select().from(participants).where(inArray(participants.id, ids)) : [];
+    const partOf = new Map(parts.map((p) => [p.id, p]));
+    if (kinds.includes('acrofobia')) {
+      for (const r of await loadAcrofobia(db, crypto, camp.id)) {
+        if (!wanted.has(r.participantId)) continue;
+        const e = entry(r.participantId);
+        e.docs.push({ name: `Informe_Acrofobia_${r.document}.pdf`, bytes: await buildAcrofobiaReport(r, professional, generatedAt) });
+        const ctx = await loadFormatoContext(db, crypto, partOf.get(r.participantId)!, 'alturas');
+        if (ctx.saved) e.docs.push({ name: `Formato_Alturas_${r.document}.pdf`, bytes: await buildFormatoPdf({ kind: 'alturas', data: ctx.saved.data, prefill: ctx.prefill, professional }) });
+        else e.pending.push('Formato de evaluación · Trabajo en alturas (pendiente de la psicóloga)');
+      }
+    }
+    if (kinds.includes('claustrofobia')) {
+      for (const r of await loadClq(db, crypto, camp.id)) {
+        if (!wanted.has(r.participantId)) continue;
+        const e = entry(r.participantId);
+        if (r.level) e.docs.push({ name: `Informe_CLQ_${r.document}.pdf`, bytes: await buildClqReport(r, professional, generatedAt) });
+        else e.pending.push('Informe CLQ (falta la interpretación de la psicóloga)');
+        const ctx = await loadFormatoContext(db, crypto, partOf.get(r.participantId)!, 'confinados');
+        if (ctx.saved) e.docs.push({ name: `Formato_EspaciosConfinados_${r.document}.pdf`, bytes: await buildFormatoPdf({ kind: 'confinados', data: ctx.saved.data, prefill: ctx.prefill, clq: { total: r.result.total, level: r.level }, professional }) });
+        else e.pending.push('Formato de evaluación · Espacios confinados (pendiente de la psicóloga)');
+      }
+    }
+    return result;
+  }
+
   let running = false;
   const queue: string[] = [];
 
@@ -235,6 +280,9 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       }
       await db.update(exportJobs).set({ total: rows.length }).where(eq(exportJobs.id, jobId));
       const professional = await professionalFor(actor!, camp!);
+      const generatedAt = new Date();
+      // Campañas con evaluaciones distintas a la batería: además del expediente, un informe por prueba y los formatos ya diligenciados.
+      const withExtras = camp!.assessments.some((a) => a !== 'psychosocial');
 
       const out = fs.createWriteStream(file);
       const zip = new ZipArchive({ zlib: { level: 1 } });
@@ -247,15 +295,26 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       let done = 0;
       let written = 0;
       zip.on('entry', () => written++);
-      const generatedAt = new Date();
       const campSlug = slug(camp!.name);
       const worker = new PdfWorker();
+      const pendingNotes: string[] = [];
       try {
         for (let i = 0; i < rows.length; i += 25) {
-          const batch = await loadExpedientes(db, crypto, rows.slice(i, i + 25).map((r) => r.id));
+          const batchIds = rows.slice(i, i + 25).map((r) => r.id);
+          const batch = await loadExpedientes(db, crypto, batchIds);
+          const extras = await extraDocsFor(camp!, batchIds, professional, generatedAt);
           for (const e of batch) {
             const bytes = await worker.build(e, professional, generatedAt);
-            zip.append(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), { name: `${e.document}_${campSlug}.pdf` });
+            const own = extras.get(e.participantId);
+            if (!withExtras) {
+              zip.append(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), { name: `${e.document}_${campSlug}.pdf` });
+            } else {
+              // Una carpeta por persona: expediente (consentimiento y ficha) + informes + formatos listos
+              const dir = `${e.document}_${campSlug}`;
+              zip.append(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), { name: `${dir}/Expediente_${e.document}.pdf` });
+              for (const d of own?.docs ?? []) zip.append(Buffer.from(d.bytes.buffer, d.bytes.byteOffset, d.bytes.byteLength), { name: `${dir}/${d.name}` });
+              for (const n of own?.pending ?? []) pendingNotes.push(`${e.document} · ${e.fullName}: ${n}`);
+            }
             done++;
             // contrapresión: no dejar más de unos pocos PDF en cola hacia el disco
             while (done - written > 6) await new Promise((r) => setTimeout(r, 20));
@@ -264,6 +323,9 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
         }
       } finally {
         await worker.close();
+      }
+      if (pendingNotes.length) {
+        zip.append(Buffer.from(['Documentos que todavía no están disponibles (la psicóloga debe diligenciarlos o marcar la interpretación):', '', ...pendingNotes, ''].join('\r\n'), 'utf8'), { name: 'PENDIENTES.txt' });
       }
       await zip.finalize();
       await closed;

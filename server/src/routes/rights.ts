@@ -33,7 +33,8 @@ const rectifySchema = z.object({
  */
 export const rightsRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
-  const staff = app.requireReady('admin', 'psychologist');
+  // También el auxiliar administrativo (dentro de lo que se le asignó, ver `manageableCampaign`).
+  const staff = app.requireReady('admin', 'psychologist', 'assistant');
 
   async function target(req: FastifyRequest) {
     const { id } = req.params as { id: string };

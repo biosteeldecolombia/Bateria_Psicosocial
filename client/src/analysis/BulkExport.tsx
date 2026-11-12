@@ -25,7 +25,7 @@ interface Job {
 }
 
 /** Exportación masiva: ZIP con un PDF por persona. Pide contraseña y código MFA; el archivo se descarga una sola vez. */
-export function BulkExport({ campaignId, reason, areas, onClose }: { campaignId: string; reason: string; areas: { value: string; people: number }[]; onClose: () => void }) {
+export function BulkExport({ campaignId, reason, hasPsy, areas, onClose }: { campaignId: string; reason: string; hasPsy: boolean; areas: { value: string; people: number }[]; onClose: () => void }) {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [scope, setScope] = useState<'completed' | 'all'>('completed');
@@ -74,30 +74,38 @@ export function BulkExport({ campaignId, reason, areas, onClose }: { campaignId:
         <h2 id="bx-t">Descargar expedientes en PDF</h2>
         {!job ? (
           <form onSubmit={start} noValidate>
-            <p className="muted">Genera un ZIP con un PDF por persona (consentimiento, ficha y cuestionarios, con el aspecto de las plantillas oficiales). Por seguridad, confirma tu identidad.</p>
+            <p className="muted">{hasPsy
+              ? 'Genera un ZIP con un PDF por persona (consentimiento, ficha y cuestionarios, con el aspecto de las plantillas oficiales).'
+              : 'Genera un ZIP con una carpeta por persona: su consentimiento y ficha, los informes de las pruebas de esta campaña y los formatos de evaluación que la psicóloga ya diligenció (los pendientes se listan en PENDIENTES.txt).'} Por seguridad, confirma tu identidad.</p>
             <div className="two">
               <div>
                 <label htmlFor="bx-s">Incluir</label>
                 <select id="bx-s" value={scope} onChange={(e) => setScope(e.target.value as 'completed' | 'all')}>
-                  <option value="completed">Solo quienes completaron la batería</option>
+                  <option value="completed">Solo quienes completaron</option>
                   <option value="all">Todos (incluye quienes no autorizaron o siguen en curso)</option>
                 </select>
               </div>
-              <div>
-                <label htmlFor="bx-f">Forma intralaboral</label>
-                <select id="bx-f" value={form} onChange={(e) => setForm(e.target.value)}>
-                  <option value="">Ambas</option>
-                  <option value="A">Forma A (jefaturas y profesionales)</option>
-                  <option value="B">Forma B (auxiliares y operarios)</option>
-                </select>
-              </div>
+              {hasPsy && (
+                <div>
+                  <label htmlFor="bx-f">Forma intralaboral</label>
+                  <select id="bx-f" value={form} onChange={(e) => setForm(e.target.value)}>
+                    <option value="">Ambas</option>
+                    <option value="A">Forma A (jefaturas y profesionales)</option>
+                    <option value="B">Forma B (auxiliares y operarios)</option>
+                  </select>
+                </div>
+              )}
             </div>
-            <label htmlFor="bx-a">Área</label>
-            <select id="bx-a" value={area} onChange={(e) => setArea(e.target.value)}>
-              <option value="">Todas</option>
-              {areas.map((v) => <option key={v.value} value={v.value}>{v.value} — {v.people}</option>)}
-            </select>
-            <p className="hint">Cada expediente pesa unos 5 MB. En campañas grandes conviene descargar por área o por forma para obtener archivos más manejables.</p>
+            {hasPsy && (
+              <>
+                <label htmlFor="bx-a">Área</label>
+                <select id="bx-a" value={area} onChange={(e) => setArea(e.target.value)}>
+                  <option value="">Todas</option>
+                  {areas.map((v) => <option key={v.value} value={v.value}>{v.value} — {v.people}</option>)}
+                </select>
+                <p className="hint">Cada expediente pesa unos 5 MB. En campañas grandes conviene descargar por área o por forma para obtener archivos más manejables.</p>
+              </>
+            )}
             <label htmlFor="bx-p">Tu contraseña</label>
             <input id="bx-p" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             <label htmlFor="bx-c">Código de tu aplicación de autenticación (6 dígitos)</label>

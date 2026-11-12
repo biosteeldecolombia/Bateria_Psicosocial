@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { nameParts } from '../results/names.js';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import { DISC_DATA_VERSION, FORMATOS, FORMATO_KINDS, PF16_ITEMS, isClqLevel, parseFormatoData, type FormatoKind } from '@sanithelp/shared';
 import {
   DOMAIN_BLOCKS,
@@ -17,9 +17,9 @@ import {
   type GroupingField,
   type RpsRow,
 } from '@sanithelp/scoring';
-import { campaigns, consents, fichaAnswers, manualResults, participants, questionnaireAnswers } from '../db/schema.js';
+import { auditLog, campaigns, companies, consents, fichaAnswers, manualResults, participants, questionnaireAnswers } from '../db/schema.js';
 import { audit } from '../auth/service.js';
-import { manageableCampaign } from '../auth/access.js';
+import { allowedCompanyIds, assistantScope, manageableCampaign } from '../auth/access.js';
 import { clinicalAccess as clinical } from '../auth/clinical.js';
 import { loadRecords } from '../results/service.js';
 import { discView, loadDisc } from '../results/disc.js';
@@ -43,9 +43,19 @@ const csvCell = (v: unknown) => {
  */
 export const resultsRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
-  const staff = app.requireReady('admin', 'psychologist');
+  // El auxiliar administrativo ve lo mismo que la psicóloga (con motivo de acceso, ver `clinicalAccess`), salvo diligenciar los formatos de evaluación.
+  const staff = app.requireReady('admin', 'psychologist', 'assistant');
+  /** Formatos de evaluación e interpretación del CLQ: solo la psicóloga (y el administrador). */
+  const fill = app.requireReady('admin', 'psychologist');
 
   const clinicalAccess = (req: FastifyRequest, reply: FastifyReply, campaignId: string) => clinical(db, req, reply, campaignId);
+
+  /** Participantes (de los dados) cuyo formato de evaluación ya fue diligenciado y guardado por la psicóloga. */
+  async function savedFormato(kind: FormatoKind, ids: string[]): Promise<Set<string>> {
+    if (!ids.length) return new Set();
+    const rows = await db.select({ id: manualResults.participantId }).from(manualResults).where(and(inArray(manualResults.participantId, ids), eq(manualResults.instrument, formatoInstrument(kind))));
+    return new Set(rows.map((r) => r.id));
+  }
 
   const field = (q: unknown): GroupingField | null => {
     const f = (q as { field?: string }).field;
@@ -53,7 +63,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
   };
 
   // Listado (identidad y estado, sin resultados): también lo ve el auxiliar administrativo de las campañas que se le asignaron.
-  app.get('/campaigns/:id/participants', { preHandler: app.requireReady('admin', 'psychologist', 'assistant') }, async (req, reply) => {
+  app.get('/campaigns/:id/participants', { preHandler: staff }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const actor = req.auth!.user;
     const c = await manageableCampaign(db, actor.id, actor.role, id);
@@ -71,6 +81,12 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
         if ((JSON.parse(crypto.decrypt(r.dataEnc)) as { v?: number }).v !== DISC_DATA_VERSION) staleDisc.add(r.participantId);
       }
     }
+    // Formatos de evaluación ya diligenciados por la psicóloga (habilitan su descarga)
+    const savedFormatos = new Set(
+      ids.length
+        ? (await db.select({ participantId: manualResults.participantId, instrument: manualResults.instrument }).from(manualResults).where(and(inArray(manualResults.participantId, ids), inArray(manualResults.instrument, FORMATO_KINDS.map(formatoInstrument))))).map((m) => `${m.participantId}:${m.instrument}`)
+        : [],
+    );
     const consentBy = new Map(cons.map((x) => [x.participantId, x]));
     const fichaBy = new Map(fichas.map((x) => [x.participantId, x.complete]));
     await audit(db, actor.id, 'participants.listed', { type: 'campaign', id: c.id });
@@ -87,11 +103,68 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
           form: p.form,
           formManual: p.formManual,
           progress: { ficha: fichaBy.get(p.id) ?? false, intralaboral: done.some((x) => x.startsWith('intra')), extralaboral: done.includes('extra'), estres: done.includes('stress'), disc: done.includes('disc'), discOutdated: staleDisc.has(p.id), valanti: done.includes('valanti'), pf16: done.includes('pf16'), acrofobia: done.includes('acrofobia'), claustrofobia: done.includes('claustrofobia') },
+          formatos: Object.fromEntries(FORMATO_KINDS.map((k) => [k, savedFormatos.has(`${p.id}:${formatoInstrument(k)}`)])) as Record<FormatoKind, boolean>,
           startedAt: p.createdAt,
           submittedAt: p.submittedAt,
         };
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName, 'es'));
+  });
+
+  /**
+   * Avisos de formatos de evaluación (alturas / espacios confinados):
+   *  - psicóloga: cuántos le faltan por diligenciar (personas que ya completaron el cuestionario), por campaña;
+   *  - auxiliar: cuáles ya están listos para descargar y todavía no ha descargado ella, por campaña.
+   */
+  app.get('/notifications/formatos', { preHandler: app.requireReady('psychologist', 'assistant') }, async (req) => {
+    const actor = req.auth!.user;
+    const isAssistant = actor.role === 'assistant';
+    const ids = await allowedCompanyIds(db, actor.id, actor.role);
+    const extraIds = isAssistant ? (await assistantScope(db, actor.id)).campaignIds : [];
+    const companyIds = ids === 'all' ? [] : ids;
+    const camps = companyIds.length || extraIds.length
+      ? (await db.select().from(campaigns).where(or(...(companyIds.length ? [inArray(campaigns.companyId, companyIds)] : []), ...(extraIds.length ? [inArray(campaigns.id, extraIds)] : [])))).filter((c) => FORMATO_KINDS.some((k) => c.assessments.includes(FORMATOS[k].assessment)))
+      : [];
+    if (!camps.length) return { pending: [], ready: [] };
+    const companyName = new Map((await db.select({ id: companies.id, name: companies.name }).from(companies)).map((c) => [c.id, c.name]));
+    const parts = await db.select({ id: participants.id, campaignId: participants.campaignId }).from(participants).where(and(inArray(participants.campaignId, camps.map((c) => c.id)), eq(participants.status, 'completed')));
+    if (!parts.length) return { pending: [], ready: [] };
+    const pids = parts.map((p) => p.id);
+    const campOf = new Map(parts.map((p) => [p.id, p.campaignId]));
+    const noConsent = new Set((await db.select().from(consents).where(inArray(consents.participantId, pids))).filter((c) => c.revokedAt || c.decision !== 'authorized').map((c) => c.participantId));
+    const answered = await db.select({ participantId: questionnaireAnswers.participantId, instrument: questionnaireAnswers.instrument }).from(questionnaireAnswers).where(and(inArray(questionnaireAnswers.participantId, pids), inArray(questionnaireAnswers.instrument, FORMATO_KINDS.map((k) => FORMATOS[k].assessment)), eq(questionnaireAnswers.complete, true)));
+    const saved = new Map((await db.select({ participantId: manualResults.participantId, instrument: manualResults.instrument, updatedAt: manualResults.updatedAt }).from(manualResults).where(and(inArray(manualResults.participantId, pids), inArray(manualResults.instrument, FORMATO_KINDS.map(formatoInstrument))))).map((m) => [`${m.participantId}:${m.instrument}`, m.updatedAt]));
+    // Descargas previas de esta persona (para no avisar de lo que ya bajó)
+    const downloaded = new Map<string, Date>();
+    if (isAssistant && saved.size) {
+      for (const a of await db.select({ targetId: auditLog.targetId, meta: auditLog.meta, at: auditLog.at }).from(auditLog).where(and(eq(auditLog.actorId, actor.id), eq(auditLog.action, 'pdf.formato'), inArray(auditLog.targetId, pids)))) {
+        const key = `${a.targetId}:${formatoInstrument(String(a.meta.kind) as FormatoKind)}`;
+        if (!downloaded.has(key) || downloaded.get(key)! < a.at) downloaded.set(key, a.at);
+      }
+    }
+    const pending = new Map<string, number>();
+    const ready = new Map<string, number>();
+    for (const a of answered) {
+      if (noConsent.has(a.participantId)) continue;
+      const kind = FORMATO_KINDS.find((k) => FORMATOS[k].assessment === a.instrument)!;
+      const campaignId = campOf.get(a.participantId)!;
+      if (!camps.find((c) => c.id === campaignId)!.assessments.includes(a.instrument)) continue;
+      const key = `${a.participantId}:${formatoInstrument(kind)}`;
+      const at = saved.get(key);
+      const bucket = `${campaignId}|${kind}`;
+      if (!at) {
+        if (!isAssistant) pending.set(bucket, (pending.get(bucket) ?? 0) + 1);
+      } else if (isAssistant && !(downloaded.get(key) && downloaded.get(key)! >= at)) {
+        ready.set(bucket, (ready.get(bucket) ?? 0) + 1);
+      }
+    }
+    const list = (m: Map<string, number>) =>
+      [...m.entries()].map(([bucket, count]) => {
+        const [campaignId, kind] = bucket.split('|') as [string, FormatoKind];
+        const c = camps.find((x) => x.id === campaignId)!;
+        return { campaignId, campaignName: c.name, companyName: companyName.get(c.companyId) ?? '', kind, count };
+      });
+    return { pending: list(pending), ready: list(ready) };
   });
 
   /** Nuevo código personal cuando la persona perdió el suyo. Se muestra una sola vez. */
@@ -128,7 +201,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     return reply
       .header('Content-Type', 'text/csv; charset=utf-8')
       .header('Content-Disposition', 'attachment; filename="DatosRPS.csv"')
-      .send('﻿' + lines.join('\r\n'));
+      .send('\uFEFF' + lines.join('\r\n'));
   });
 
   /** ResTOT / ResTOT2: distribución por nivel de riesgo, opcionalmente para un grupo. */
@@ -193,8 +266,9 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     const c = await clinicalAccess(req, reply, id);
     if (!c) return;
     const recs = await loadAcrofobia(db, crypto, c.id);
+    const saved = await savedFormato('alturas', recs.map((r) => r.participantId));
     await audit(db, req.auth!.user.id, 'results.acrofobia_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
-    return { people: recs.map(acrofobiaView) };
+    return { people: recs.map((r) => ({ ...acrofobiaView(r), formatoSaved: saved.has(r.participantId) })) };
   });
 
   /** CLQ: puntaje total y la interpretación que marca la psicóloga. */
@@ -203,12 +277,13 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     const c = await clinicalAccess(req, reply, id);
     if (!c) return;
     const recs = await loadClq(db, crypto, c.id);
+    const saved = await savedFormato('confinados', recs.map((r) => r.participantId));
     await audit(db, req.auth!.user.id, 'results.claustrofobia_viewed', { type: 'campaign', id: c.id }, { people: recs.length });
-    return { people: recs.map(clqView) };
+    return { people: recs.map((r) => ({ ...clqView(r), formatoSaved: saved.has(r.participantId) })) };
   });
 
   /** La psicóloga marca la interpretación del CLQ (bajo, moderado o alto). Habilita la descarga del PDF. */
-  app.put('/participants/:id/claustrofobia', { preHandler: staff }, async (req, reply) => {
+  app.put('/participants/:id/claustrofobia', { preHandler: fill }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const [p] = /^[0-9a-f-]{36}$/i.test(id) ? await db.select().from(participants).where(eq(participants.id, id)).limit(1) : [];
     if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
@@ -246,7 +321,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
   }
 
   /** Formato de evaluación psicológica ocupacional: resultados del test, datos precargados y lo que la psicóloga ya diligenció. */
-  app.get('/participants/:id/formatos/:kind', { preHandler: staff }, async (req, reply) => {
+  app.get('/participants/:id/formatos/:kind', { preHandler: fill }, async (req, reply) => {
     const t = await formatoTarget(req, reply);
     if (!t) return;
     const ctx = await loadFormatoContext(db, crypto, t.p, t.kind);
@@ -263,7 +338,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Guarda lo que la psicóloga diligencia en el panel (cifrado). En espacios confinados también guarda la interpretación del CLQ. */
-  app.put('/participants/:id/formatos/:kind', { preHandler: staff, bodyLimit: 100_000 }, async (req, reply) => {
+  app.put('/participants/:id/formatos/:kind', { preHandler: fill, bodyLimit: 100_000 }, async (req, reply) => {
     const t = await formatoTarget(req, reply);
     if (!t) return;
     const data = parseFormatoData(t.kind, req.body);
@@ -311,7 +386,7 @@ export const resultsRoutes: FastifyPluginAsync = async (app) => {
     return reply
       .header('Content-Type', 'text/csv; charset=utf-8')
       .header('Content-Disposition', 'attachment; filename="Respuestas16PF.csv"')
-      .send('﻿' + lines.join('\r\n'));
+      .send('\uFEFF' + lines.join('\r\n'));
   });
 
   /** Informe individual de una persona (para la psicóloga). */

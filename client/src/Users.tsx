@@ -158,7 +158,7 @@ function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { c
             <label htmlFor="uf-role">Rol</label>
             <select id="uf-role" value={role} onChange={(e) => { setRole(e.target.value as UserRow['role']); setIds([]); setCampIds([]); }}>
               <option value="psychologist">Psicóloga</option>
-              <option value="assistant">Auxiliar administrativo (descarga documentos)</option>
+              <option value="assistant">Auxiliar administrativo (campañas y descarga de documentos)</option>
               <option value="admin">Administrador</option>
               <option value="company">Empresa cliente (solo reportes)</option>
             </select>

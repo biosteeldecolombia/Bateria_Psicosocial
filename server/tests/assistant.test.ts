@@ -1,13 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import { CARGO_OPTIONS } from '@sanithelp/shared';
-import { ADMIN_EMAIL, ADMIN_PW, loginStaffReady, newClient, seedAdmin, startEnv, type Client, type TestEnv } from './helpers.js';
+import { ADMIN_EMAIL, ADMIN_PW, loginStaffReady, newClient, seedAdmin, startEnv, totpNow, type Client, type TestEnv } from './helpers.js';
 
 let env: TestEnv;
 let admin: Client;
 let psy: Client;
 let aux: Client;
 let auxId: string;
+let auxSecret: string;
+let auxPw: string;
 let c1: string;
 let c2: string;
 let k1: { campaignId: string; participantId: string }; // empresa 1 (asignada completa)
@@ -53,7 +55,10 @@ beforeAll(async () => {
   const a = await admin.call('POST', '/api/admin/users', { role: 'assistant', username: 'aux@sanithelp.test', fullName: 'Auxiliar Prueba', assignedCompanyIds: [c1], assignedCampaignIds: [k2b.campaignId] });
   expect(a.status, JSON.stringify(a.json)).toBe(201);
   auxId = a.json.id;
-  aux = (await loginStaffReady(env, 'aux@sanithelp.test', a.json.password)).client; // el rol exige verificación en dos pasos
+  const auxLogin = await loginStaffReady(env, 'aux@sanithelp.test', a.json.password); // el rol exige verificación en dos pasos
+  aux = auxLogin.client;
+  auxSecret = auxLogin.secret;
+  auxPw = a.json.password;
 }, 180_000);
 afterAll(async () => {
   await env?.stop();
@@ -63,7 +68,7 @@ describe('Auxiliar administrativo', () => {
   it('exige la verificación en dos pasos y solo ve lo que se le asignó (empresa completa o campaña suelta)', async () => {
     const list = (await aux.call('GET', '/api/campaigns')).json as { id: string; accessUsername: string | null }[];
     expect(list.map((c) => c.id).sort()).toEqual([k1.campaignId, k2b.campaignId].sort());
-    expect(list.every((c) => c.accessUsername === null)).toBe(true); // no ve el usuario de acceso de la campaña
+    expect(list.every((c) => !!c.accessUsername)).toBe(true); // como la psicóloga, ve el usuario de acceso de la campaña
     const cos = ((await aux.call('GET', '/api/companies')).json as { id: string }[]).map((c) => c.id).sort();
     expect(cos).toEqual([c1, c2].sort());
     expect((await aux.call('GET', `/api/campaigns/${k1.campaignId}/participants`)).status).toBe(200);
@@ -88,23 +93,81 @@ describe('Auxiliar administrativo', () => {
     expect(audit.rows[0].n).toBeGreaterThanOrEqual(3);
   });
 
-  it('no puede ver resultados en pantalla, gestionar personas, crear campañas ni administrar', async () => {
+  it('tiene lo mismo que la psicóloga en campañas y resultados (con motivo), pero no diligencia los formatos ni administra', async () => {
     const deny = async (r: Promise<{ status: number }>) => expect((await r).status).toBe(403);
-    await deny(aux.call('GET', `/api/campaigns/${k1.campaignId}/acrofobia?${WHY}`)); // resultados
-    await deny(aux.call('GET', `/api/campaigns/${k1.campaignId}/results?${WHY}`));
-    await deny(aux.call('GET', `/api/campaigns/${k1.campaignId}/results.csv?${WHY}`));
-    await deny(aux.call('GET', `/api/participants/${k1.participantId}/formatos/alturas?${WHY}`)); // diligenciar el formato
+    // Resultados: con motivo sí; sin motivo no
+    expect((await aux.call('GET', `/api/campaigns/${k1.campaignId}/acrofobia?${WHY}`)).status).toBe(200);
+    expect((await aux.call('GET', `/api/campaigns/${k1.campaignId}/results?${WHY}`)).status).toBe(200);
+    await deny(aux.call('GET', `/api/campaigns/${k1.campaignId}/acrofobia`));
+    expect((await aux.call('GET', `/api/campaigns/${k2a.campaignId}/acrofobia?${WHY}`)).status).toBe(404); // fuera de lo asignado
+    // Gestión de campañas: ve la credencial y puede crear en sus empresas
+    expect((await aux.call('GET', `/api/campaigns/${k1.campaignId}/access`)).status).toBe(200);
+    const created = await aux.call('POST', '/api/campaigns', { companyId: c1, name: 'Creada por la auxiliar', assessments: ['acrofobia', 'claustrofobia'] });
+    expect(created.status).toBe(201);
+    expect((await aux.call('GET', `/api/campaigns/${created.json.id}/access`)).status).toBe(200); // queda dentro de su empresa
+    expect((await aux.call('POST', '/api/campaigns', { companyId: c2, name: 'Otra', assessments: ['acrofobia'] })).status).toBe(404); // c2 solo tiene una campaña suelta
+    // Formatos de evaluación: no los ve para diligenciar ni los guarda; tampoco marca la interpretación del CLQ
+    await deny(aux.call('GET', `/api/participants/${k1.participantId}/formatos/alturas?${WHY}`));
     await deny(aux.call('PUT', `/api/participants/${k1.participantId}/formatos/alturas`, { values: {}, factors: {}, concept: null }));
-    await deny(aux.call('POST', `/api/participants/${k1.participantId}/reset-code`));
-    await deny(aux.call('POST', `/api/participants/${k1.participantId}/reopen`, { instrument: 'acrofobia', reason: 'x'.repeat(12), password: 'x' }));
-    await deny(aux.call('POST', `/api/participants/${k1.participantId}/erase`, { password: 'x' }));
-    await deny(aux.call('PATCH', `/api/participants/${k1.participantId}`, { names: 'Otro' }));
-    await deny(aux.call('POST', '/api/campaigns', { companyId: c1, name: 'Nueva', assessments: ['acrofobia'] }));
-    await deny(aux.call('GET', `/api/campaigns/${k1.campaignId}/access`));
-    await deny(aux.call('POST', `/api/campaigns/${k1.campaignId}/status`, { status: 'closed' }));
+    await deny(aux.call('PUT', `/api/participants/${k1.participantId}/claustrofobia`, { level: 'low' }));
+    // Administración y perfil profesional: no
     await deny(aux.call('GET', '/api/admin/users'));
     await deny(aux.call('POST', '/api/admin/companies', { name: 'X', code: 'XX' }));
     await deny(aux.call('GET', '/api/profile'));
+  });
+
+  it('avisa a la psicóloga de los formatos pendientes y a la auxiliar de los que ya puede descargar', async () => {
+    const notes = async (c: Client) => (await c.call('GET', '/api/notifications/formatos')).json as { pending: { campaignId: string; kind: string; count: number }[]; ready: { campaignId: string; kind: string; count: number }[] };
+    const sum = (l: { count: number }[]) => l.reduce((n, x) => n + x.count, 0);
+    // Antes de que la psicóloga diligencie: a ella le faltan 3; a la auxiliar (k1 y k2b) no le llega nada y el formato sale inhabilitado
+    const before = await notes(psy);
+    expect(before.pending.find((x) => x.campaignId === k1.campaignId && x.kind === 'alturas')?.count).toBe(1);
+    expect(before.ready).toEqual([]);
+    expect(sum((await notes(aux)).ready)).toBe(0);
+    const listed = (await aux.call('GET', `/api/campaigns/${k1.campaignId}/participants`)).json as { formatos: { alturas: boolean } }[];
+    expect(listed[0]!.formatos.alturas).toBe(false);
+    expect((await pdf(aux, `/api/participants/${k1.participantId}/formatos/alturas/pdf?${WHY}`)).statusCode).toBe(409); // aún sin diligenciar
+    // La psicóloga diligencia el de k1
+    const put = await psy.call('PUT', `/api/participants/${k1.participantId}/formatos/alturas`, { values: { 'mental.atencion': 'Conservada' }, factors: {}, concept: 'apto' });
+    expect(put.status, JSON.stringify(put.json)).toBe(200);
+    const after = await notes(psy);
+    expect(after.pending.find((x) => x.campaignId === k1.campaignId)).toBeUndefined();
+    const mine = await notes(aux);
+    expect(mine.ready).toEqual([{ campaignId: k1.campaignId, campaignName: 'Campaña 1', companyName: 'Empresa Uno', kind: 'alturas', count: 1 }]);
+    expect(((await aux.call('GET', `/api/campaigns/${k1.campaignId}/participants`)).json as { formatos: { alturas: boolean } }[])[0]!.formatos.alturas).toBe(true);
+    // Al descargarlo, el aviso desaparece
+    const dl = await pdf(aux, `/api/participants/${k1.participantId}/formatos/alturas/pdf?${WHY}`);
+    expect(dl.statusCode, dl.body).toBe(200);
+    expect(dl.headers['content-type']).toBe('application/pdf');
+    expect(sum((await notes(aux)).ready)).toBe(0);
+  });
+
+  it('el ZIP de una campaña de alturas trae el expediente, el informe y el formato listo; no el de la batería psicosocial', async () => {
+    const run = async (campaignId: string) => {
+      await env.pool.query("UPDATE users SET mfa_last_step = NULL WHERE role = 'assistant'");
+      const r = await aux.call('POST', `/api/campaigns/${campaignId}/exports`, { password: auxPw, code: totpNow(auxSecret, 1), justification: 'Descarga solicitada por la psicologa' });
+      expect(r.status, JSON.stringify(r.json)).toBe(202);
+      let st: { status: string; done: number } = { status: 'queued', done: 0 };
+      for (let i = 0; i < 120 && st.status !== 'done' && st.status !== 'failed'; i++) {
+        await new Promise((x) => setTimeout(x, 500));
+        st = (await aux.call('GET', `/api/exports/${r.json.id}`)).json;
+      }
+      expect(st.status).toBe('done');
+      const dl = await pdf(aux, `/api/exports/${r.json.id}/download`);
+      expect(dl.statusCode).toBe(200);
+      return dl.rawPayload.toString('latin1');
+    };
+    // k1: el formato de alturas ya está diligenciado (lo guardó la psicóloga en la prueba anterior)
+    const ready = await run(k1.campaignId);
+    expect(ready).toContain('Informe_Acrofobia_9000001.pdf');
+    expect(ready).toContain('Formato_Alturas_9000001.pdf');
+    expect(ready).toContain('Expediente_9000001.pdf');
+    expect(ready).not.toContain('PENDIENTES.txt');
+    // k2b: aún sin formato → se entrega el informe y se anota lo pendiente
+    const waiting = await run(k2b.campaignId);
+    expect(waiting).toContain('Informe_Acrofobia_9000003.pdf');
+    expect(waiting).not.toContain('Formato_Alturas_9000003.pdf');
+    expect(waiting).toContain('PENDIENTES.txt');
   });
 
   it('la exportación masiva exige contraseña y código de la aplicación, y respeta la asignación', async () => {
