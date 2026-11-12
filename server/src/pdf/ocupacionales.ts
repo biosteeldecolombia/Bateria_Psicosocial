@@ -20,6 +20,7 @@ import type { ConsentPdfInput } from './consent.js';
 import { TEMPLATES_DIR } from './questionnaires.js';
 import type { Professional } from './expediente.js';
 import { SIGNATURE_BLOCK_H, drawSignatureBlock, drawSignatureIn, embedSignature } from './firma.js';
+import { brandDocument, defaultStyle, type PdfStyle } from './brand.js';
 
 const INK = rgb(0.1, 0.18, 0.26);
 const MUTED = rgb(0.35, 0.42, 0.47);
@@ -235,14 +236,12 @@ export async function occupationalConsentInto(doc: PDFDocument, inp: ConsentPdfI
 const level = (l: string) => l;
 
 /** Informe individual de la Acrofobia de Cohen: dos escalas con su nivel y el registro de respuestas por situación. */
-export async function buildAcrofobiaReport(rec: AcrofobiaRecord, professional: Professional, generatedAt: Date): Promise<Uint8Array> {
+export async function buildAcrofobiaReport(rec: AcrofobiaRecord, professional: Professional, generatedAt: Date, style: PdfStyle = defaultStyle('acrofobia')): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const w = new Writer(doc, font, bold);
+  const w = new Writer(doc, font, bold, undefined, 52);
   const r = rec.result;
-  w.line('Cuestionario de Acrofobia · Cohen', M, 16, bold);
-  w.gap(20);
   w.line('Documento confidencial para la psicóloga responsable. No constituye un diagnóstico clínico.', M, 8.5, font, MUTED);
   w.gap(18);
   w.line(`Nombre: ${rec.fullName}`);
@@ -251,7 +250,7 @@ export async function buildAcrofobiaReport(rec: AcrofobiaRecord, professional: P
   w.line(`Fecha de aplicación: ${rec.date.split('-').reverse().join('/')}`);
   w.gap(24);
 
-  w.line('Resultados por escala', M, 11, bold);
+  w.line('Resultados por escala', M, 11, bold, style.accent);
   w.gap(16);
   const heads = ['Escala', 'Puntaje', 'Máximo', 'Nivel'];
   const xs = [M, M + 150, M + 205, M + 255, M + 320];
@@ -277,7 +276,7 @@ export async function buildAcrofobiaReport(rec: AcrofobiaRecord, professional: P
   w.gap(8);
 
   w.ensure(60);
-  w.line('Registro de respuestas por situación', M, 11, bold);
+  w.line('Registro de respuestas por situación', M, 11, bold, style.accent);
   w.gap(16);
   const cx = [M, M + 24, M + 400, M + 450];
   ['N.°', 'Situación', 'Ansiedad', 'Evitación'].forEach((h, i) => w.pg.drawText(h, { x: cx[i]!, y: w.y, size: 8.5, font: bold, color: INK }));
@@ -299,20 +298,18 @@ export async function buildAcrofobiaReport(rec: AcrofobiaRecord, professional: P
 
   w.ensure(SIGNATURE_BLOCK_H + 10);
   await drawSignatureBlock(doc, w.pg, professional, w.y, M, font);
-  footer(doc.getPages(), font, professional, generatedAt);
+  await brandDocument(doc, style, professional, generatedAt, { font, bold }, M);
   doc.setTitle('Acrofobia Cohen');
   doc.setProducer('Sanithelp');
   return doc.save();
 }
 
 /** Hoja de respuestas del CLQ con el puntaje y la interpretación marcada por la psicóloga (solo se genera cuando ya la marcó). */
-export async function buildClqReport(rec: ClqRecord, professional: Professional, generatedAt: Date): Promise<Uint8Array> {
+export async function buildClqReport(rec: ClqRecord, professional: Professional, generatedAt: Date, style: PdfStyle = defaultStyle('claustrofobia')): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const w = new Writer(doc, font, bold);
-  w.line('Test de Claustrofobia · CLQ (Radomsky)', M, 16, bold);
-  w.gap(20);
+  const w = new Writer(doc, font, bold, undefined, 52);
   w.line('Documento confidencial para la psicóloga responsable. No constituye un diagnóstico clínico.', M, 8.5, font, MUTED);
   w.gap(18);
   w.line(`Nombre: ${rec.fullName}`);
@@ -320,7 +317,7 @@ export async function buildClqReport(rec: ClqRecord, professional: Professional,
   w.gap(14);
   w.line(`Fecha de aplicación: ${rec.date.split('-').reverse().join('/')}`);
   w.gap(24);
-  w.line('RESULTADOS TEST', M, 11, bold);
+  w.line('RESULTADOS TEST', M, 11, bold, style.accent);
   w.gap(16);
   w.line(`Puntaje total CLQ: ${rec.result.total} de ${rec.result.max}`, M, 11, bold);
   w.gap(18);
@@ -338,7 +335,7 @@ export async function buildClqReport(rec: ClqRecord, professional: Professional,
   w.gap(10);
 
   w.ensure(60);
-  w.line('Registro de respuestas', M, 11, bold);
+  w.line('Registro de respuestas', M, 11, bold, style.accent);
   w.gap(16);
   const cx = [M, M + 24, M + 440];
   ['N.°', 'Situación', 'Respuesta'].forEach((h, i) => w.pg.drawText(h, { x: cx[i]!, y: w.y, size: 8.5, font: bold, color: INK }));
@@ -359,7 +356,7 @@ export async function buildClqReport(rec: ClqRecord, professional: Professional,
 
   w.ensure(SIGNATURE_BLOCK_H + 10);
   await drawSignatureBlock(doc, w.pg, professional, w.y, M, font);
-  footer(doc.getPages(), font, professional, generatedAt);
+  await brandDocument(doc, style, professional, generatedAt, { font, bold }, M);
   doc.setTitle('CLQ Claustrofobia');
   doc.setProducer('Sanithelp');
   return doc.save();

@@ -14,6 +14,7 @@ import {
 import { api, ApiError } from '../api';
 import type { FlowState } from './Flow';
 import { Loading } from '../BrandLoader';
+import { AnswerModePicker, ScaleInput, resolveMode, useAnswerMode } from './ScaleInput';
 
 type Kind = 'acrofobia' | 'claustrofobia';
 
@@ -64,6 +65,7 @@ export function OcupacionalQuestionnaire({ kind, onDone }: { kind: Kind; onDone:
   const dirty = useRef(false);
   const timer = useRef<number | undefined>(undefined);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const [answerMode, setAnswerMode] = useAnswerMode();
   const url = `/api/participation/questionnaires/${kind}`;
 
   const keysOf = (pg: (typeof pages)[number]) => Array.from({ length: pg.to - pg.from }, (_, k) => cfg.parts[pg.pi]!.offset + pg.from + k + 1);
@@ -170,6 +172,7 @@ export function OcupacionalQuestionnaire({ kind, onDone }: { kind: Kind; onDone:
         <progress max={total} value={answered} aria-label="Progreso del cuestionario" />
         <span>{answered} de {total} respondidas · Página {page + 1} de {pages.length}</span>
       </div>
+      <AnswerModePicker mode={answerMode} onChange={setAnswerMode} />
       {cfg.parts.length > 1 && <h2>{part.heading}</h2>}
       <p className="section-note">{part.instructions.join(' ')}</p>
       {numbers.map((n) => {
@@ -177,14 +180,7 @@ export function OcupacionalQuestionnaire({ kind, onDone }: { kind: Kind; onDone:
         return (
           <fieldset className={`item${missing.has(n) ? ' missing' : ''}`} id={`o${n}`} key={n}>
             <legend><span className="qn">{idx}.</span> {part.items[idx - 1]}</legend>
-            <div className="seg wrap scale">
-              {part.scale.map((label, v) => (
-                <label key={v}>
-                  <input type="radio" name={`o${n}`} checked={answers[n] === v} onChange={() => choose(n, v)} />
-                  <span>{v} · {label}</span>
-                </label>
-              ))}
-            </div>
+            <ScaleInput name={`o${n}`} labels={part.scale.map((label, v) => `${v} · ${label}`)} value={answers[n]} onChange={(v) => choose(n, v)} mode={resolveMode(answerMode, page, part.scale.length)} />
             {missing.has(n) && <p className="field-error">Responde esta pregunta.</p>}
           </fieldset>
         );

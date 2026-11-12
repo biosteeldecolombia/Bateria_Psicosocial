@@ -36,6 +36,13 @@ export const campaigns = pgTable('campaigns', {
   accessPasswordEnc: text('access_password_enc'),
   /** Psicóloga responsable de la campaña: sus datos y su firma salen en los documentos. Null = la asignada a la empresa. */
   responsibleUserId: uuid('responsible_user_id'),
+  /** Etapa del flujo de trabajo (ver WORKFLOW_STAGES en @sanithelp/shared). */
+  stage: text('stage').notNull().default('created'),
+  stageChangedAt: timestamp('stage_changed_at', { withTimezone: true }).notNull().defaultNow(),
+  /** Responsables por proceso (usuarios de personal). Null = sin asignar. */
+  ownerApplicationId: uuid('owner_application_id'),
+  ownerEvaluationId: uuid('owner_evaluation_id'),
+  ownerDeliveryId: uuid('owner_delivery_id'),
 });
 
 export const users = pgTable(
@@ -59,6 +66,11 @@ export const users = pgTable(
     mfaSecretEnc: text('mfa_secret_enc'),
     mfaEnabled: boolean('mfa_enabled').notNull().default(false),
     mfaLastStep: integer('mfa_last_step'),
+    /** Método de verificación en dos pasos elegido: 'totp' (aplicación) o 'email' (código por correo). */
+    mfaMethod: text('mfa_method'),
+    /** Contraseña temporal asignada por el administrador, cifrada, visible con la llave hasta que la persona la cambie. */
+    initialPasswordEnc: text('initial_password_enc'),
+    passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
     recoveryCodeHashes: jsonb('recovery_code_hashes').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     failedAttempts: integer('failed_attempts').notNull().default(0),
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
@@ -120,6 +132,10 @@ export const participants = pgTable(
     /** true cuando la psicóloga fijó la forma a mano: la ficha ya no la recalcula con la pregunta 14. */
     formManual: boolean('form_manual').notNull().default(false),
     status: participantStatusEnum('status').notNull().default('in_progress'),
+    /** Revisión de la psicóloga: pending → in_review → evaluated. */
+    reviewStatus: text('review_status').notNull().default('pending'),
+    reviewedBy: uuid('reviewed_by'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -155,6 +171,9 @@ export const questionnaireAnswers = pgTable(
     instrument: text('instrument').notNull(),
     dataEnc: text('data_enc').notNull(),
     complete: boolean('complete').notNull().default(false),
+    /** Cuándo empezó a responder esta evaluación y cuándo la terminó (para medir cuánto tarda cada test). */
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.participantId, t.instrument] })],
@@ -182,6 +201,10 @@ export const sessions = pgTable(
     participantId: uuid('participant_id').references(() => participants.id, { onDelete: 'set null' }),
     csrfToken: text('csrf_token').notNull(),
     mfaVerified: boolean('mfa_verified').notNull().default(false),
+    /** Código de un solo uso enviado por correo (solo su hash) para la verificación en dos pasos. */
+    otpHash: text('otp_hash'),
+    otpExpiresAt: timestamp('otp_expires_at', { withTimezone: true }),
+    otpAttempts: integer('otp_attempts').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -217,4 +240,52 @@ export const exportJobs = pgTable('export_jobs', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   downloadedAt: timestamp('downloaded_at', { withTimezone: true }),
+});
+
+/** Permisos por rol que el administrador puede conceder o quitar (ver PERMISSIONS en @sanithelp/shared). Solo se guardan los cambios sobre los valores por defecto. */
+export const rolePermissions = pgTable(
+  'role_permissions',
+  {
+    role: text('role').notNull(),
+    permission: text('permission').notNull(),
+    granted: boolean('granted').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: uuid('updated_by'),
+  },
+  (t) => [primaryKey({ columns: [t.role, t.permission] })],
+);
+
+/** Dispositivos de confianza: tras la verificación en dos pasos, el equipo queda recordado unos días. Solo se guarda el hash del token. */
+export const trustedDevices = pgTable(
+  'trusted_devices',
+  {
+    id: text('id').primaryKey(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('trusted_devices_user_idx').on(t.userId)],
+);
+
+/** Historial del flujo de trabajo de cada campaña: cada cambio de etapa con quién y cuándo (trazabilidad de tiempos). */
+export const workflowEvents = pgTable(
+  'workflow_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    campaignId: uuid('campaign_id').notNull().references(() => campaigns.id, { onDelete: 'cascade' }),
+    stage: text('stage').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+    actorId: uuid('actor_id'),
+    note: text('note'),
+  },
+  (t) => [index('workflow_events_campaign_idx').on(t.campaignId)],
+);
+
+/** Configuración general editable desde el panel (umbrales de alertas, apariencia de los PDF…). */
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').$type<unknown>().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: uuid('updated_by'),
 });

@@ -26,7 +26,9 @@ function ParticipationBody({ me, onMe }: { me: MeResponse; onMe: (m: MeResponse)
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [newCode, setNewCode] = useState<{ code: string; me: MeResponse } | null>(null);
+  const [email, setEmail] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [newCode, setNewCode] = useState<{ code: string; me: MeResponse; emailSent: boolean } | null>(null);
   const [noted, setNoted] = useState(false);
 
   const run = async (fn: () => Promise<void>) => {
@@ -47,6 +49,8 @@ function ParticipationBody({ me, onMe }: { me: MeResponse; onMe: (m: MeResponse)
         <h1 id="t">Anota tu código personal</h1>
         <p>Con este código podrás <strong>retomar tu avance</strong> si cierras la página o cambias de equipo. Solo tú lo conoces y <strong>no se volverá a mostrar</strong>.</p>
         <p className="big-code" aria-label={`Tu código es ${newCode.code.split('').join(' ')}`}>{newCode.code}</p>
+        <button type="button" className="btn secondary block" onClick={() => navigator.clipboard?.writeText(newCode.code).then(() => setCopied(true)).catch(() => undefined)}>{copied ? 'Código copiado' : 'Copiar código'}</button>
+        {newCode.emailSent && <div className="alert ok" role="status">También te lo enviamos al correo que escribiste. Revisa tu bandeja (y el spam).</div>}
         <label className="check">
           <input type="checkbox" checked={noted} onChange={(e) => setNoted(e.target.checked)} /> Ya anoté mi código en un lugar seguro
         </label>
@@ -72,8 +76,8 @@ function ParticipationBody({ me, onMe }: { me: MeResponse; onMe: (m: MeResponse)
           e.preventDefault();
           void run(async () => {
             if (mode === 'start') {
-              const r = await api<{ resumeCode: string; me: MeResponse }>('POST', '/api/participation/start', { document, names, surnames });
-              setNewCode({ code: r.resumeCode, me: r.me });
+              const r = await api<{ resumeCode: string; emailSent: boolean; me: MeResponse }>('POST', '/api/participation/start', { document, names, surnames, ...(email.trim() ? { email: email.trim() } : {}) });
+              setNewCode({ code: r.resumeCode, me: r.me, emailSent: r.emailSent });
             } else {
               onMe(await api('POST', '/api/participation/resume', { document, code }));
             }
@@ -89,6 +93,9 @@ function ParticipationBody({ me, onMe }: { me: MeResponse; onMe: (m: MeResponse)
             <input id="nm" type="text" autoComplete="off" value={names} onChange={(e) => setNames(e.target.value)} />
             <label htmlFor="sn">Apellidos</label>
             <input id="sn" type="text" autoComplete="off" value={surnames} onChange={(e) => setSurnames(e.target.value)} />
+            <label htmlFor="em">Correo para enviarte tu código (opcional)</label>
+            <input id="em" type="email" inputMode="email" autoComplete="email" aria-describedby="emh" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <p id="emh" className="hint">Es para que no pierdas el código con el que retomas tu avance. No lo guardamos: solo se usa para enviártelo.</p>
           </>
         ) : (
           <>

@@ -15,7 +15,7 @@ const COMPANY_FIELDS: GroupingField[] = ['TIPO DE CARGO', 'Dpto/Area/Secc', 'Sex
  */
 export const companyRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
-  const only = app.requireReady('company');
+  const only = app.requirePerm('company.reports');
 
   async function ownCampaign(companyId: string | null, id: string) {
     if (!companyId || !/^[0-9a-f-]{36}$/i.test(id)) return null;

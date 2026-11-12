@@ -77,8 +77,44 @@ describe('autenticación del personal', () => {
     expect((await c.call('GET', '/api/companies')).status).toBe(200);
   });
 
-  it('ya no existe la ruta de cambio de contraseña autogestionado', async () => {
-    expect((await admin.call('POST', '/api/auth/change-password', { currentPassword: 'a', newPassword: 'b' })).status).toBe(404);
+  it('cada persona cambia su propia contraseña: pide la actual, aplica la política y borra la temporal', async () => {
+    const created = await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'cambio@sanithelp.test', fullName: 'Persona Cambio' });
+    // Llave: el administrador puede volver a ver la contraseña temporal
+    const key = await admin.call('GET', `/api/admin/users/${created.json.id}/credential`);
+    expect(key.status).toBe(200);
+    expect(key.json.password).toBe(created.json.password);
+    const { client: psy } = await loginStaffReady(env, 'cambio@sanithelp.test', created.json.password);
+    expect((await psy.call('POST', '/api/auth/change-password', { currentPassword: 'incorrecta-1234', newPassword: 'Otra-Clave-Larga-77' })).status).toBe(403);
+    expect((await psy.call('POST', '/api/auth/change-password', { currentPassword: created.json.password, newPassword: 'corta' })).status).toBe(400);
+    expect((await psy.call('POST', '/api/auth/change-password', { currentPassword: created.json.password, newPassword: 'Otra-Clave-Larga-77' })).status).toBe(200);
+    // Tras el cambio la contraseña temporal deja de existir para todos
+    const after = await admin.call('GET', `/api/admin/users/${created.json.id}/credential`);
+    expect(after.json.password).toBeNull();
+    expect(after.json.changedByUser).toBe(true);
+    // La clave vieja ya no sirve y la nueva sí
+    expect((await newClient(env).call('POST', '/api/auth/login', { username: 'cambio@sanithelp.test', password: created.json.password })).status).toBe(401);
+    expect((await newClient(env).call('POST', '/api/auth/login', { username: 'cambio@sanithelp.test', password: 'Otra-Clave-Larga-77' })).status).toBe(200);
+  });
+
+  it('la matriz de roles y permisos se puede editar y se aplica de inmediato', async () => {
+    const ps = await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'perm@sanithelp.test', fullName: 'Persona Permisos' });
+    const { client: psy } = await loginStaffReady(env, 'perm@sanithelp.test', ps.json.password);
+    expect((await psy.call('GET', '/api/auth/me')).json.permissions).toContain('campaigns.create');
+    // La psicóloga no puede editar los permisos
+    expect((await psy.call('GET', '/api/admin/roles')).status).toBe(403);
+    const cur = (await admin.call('GET', '/api/admin/roles')).json;
+    expect(cur.matrix.psychologist['campaigns.create']).toBe(true);
+    // El administrador le quita crear campañas
+    const next = { ...cur.matrix.psychologist, 'campaigns.create': false };
+    expect((await admin.call('PUT', '/api/admin/roles/psychologist', { permissions: next })).status).toBe(200);
+    const co = await admin.call('POST', '/api/admin/companies', { name: 'Empresa Permisos', code: 'PERMX', psychologistIds: [ps.json.id] });
+    expect((await psy.call('POST', '/api/campaigns', { companyId: co.json.id, name: 'No debería' })).status).toBe(403);
+    // Los permisos exclusivos del administrador no se pueden conceder
+    expect((await admin.call('PUT', '/api/admin/roles/psychologist', { permissions: { ...next, 'users.manage': true } })).status).toBe(200);
+    expect((await psy.call('GET', '/api/admin/users')).status).toBe(403);
+    // Restaurar los valores por defecto devuelve el permiso
+    expect((await admin.call('DELETE', '/api/admin/roles/psychologist')).status).toBe(200);
+    expect((await psy.call('POST', '/api/campaigns', { companyId: co.json.id, name: 'Ahora sí' })).status).toBe(201);
   });
 
   it('no acepta reutilizar un código TOTP ya usado', async () => {

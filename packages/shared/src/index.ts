@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ASSESSMENTS, ASSESSMENT_IDS } from './assessments';
+import type { PermissionKey } from './permissions';
 
 export * from './instrument';
 export * from './assessments';
@@ -11,6 +12,7 @@ export * from './consent_ocupacional';
 export * from './acrofobia';
 export * from './claustrofobia';
 export * from './ficha';
+export * from './permissions';
 
 export const ROLES = ['admin', 'psychologist', 'collaborator', 'company', 'assistant'] as const;
 export type Role = (typeof ROLES)[number];
@@ -75,8 +77,17 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(500),
 });
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(500),
+  newPassword: z.string().min(1).max(200),
+});
+
 export const mfaCodeSchema = z.object({
   code: z.string().trim().min(6).max(20),
+  /** Método que se está activando: aplicación de autenticación o código por correo. */
+  method: z.enum(['totp', 'email']).default('totp'),
+  /** Recordar este equipo para no pedir el segundo paso durante unos días. */
+  remember: z.boolean().optional(),
 });
 
 export const createCompanySchema = z.object({
@@ -144,7 +155,20 @@ export const campaignStatusSchema = z.object({ status: z.enum(['open', 'closed']
 /** Documento: se guardan solo letras y números (se quitan puntos, espacios y guiones). */
 export const normalizeDocument = (v: string) => v.replace(/[\s.\-]/g, '').toUpperCase();
 
+/** Correo opcional: vacío = no se envía nada. */
+export const optionalEmailSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .optional()
+  .transform((v) => (v ? v : undefined))
+  .pipe(z.string().email().optional());
+
+export const emailListSchema = z.object({ emails: z.array(z.string().trim().toLowerCase().email().max(200)).min(1).max(20) });
+
 export const startParticipationSchema = z.object({
+  /** Opcional: si la persona lo escribe, se le envía su código personal por correo (el correo no se guarda). */
+  email: optionalEmailSchema,
   document: z.string().transform(normalizeDocument).pipe(z.string().regex(/^[A-Z0-9]{5,20}$/, 'Documento inválido')),
   names: z.string().trim().min(2).max(100),
   surnames: z.string().trim().min(2).max(100),
@@ -167,5 +191,9 @@ export interface MeResponse {
   /** Solo credencial de campaña: la persona que está respondiendo en esta sesión. */
   participant: { status: 'in_progress' | 'completed' | 'declined' | 'revoked' } | null;
   campaignName: string | null;
+  /** Permisos efectivos del rol (la interfaz los usa para mostrar u ocultar opciones; el servidor siempre los vuelve a verificar). */
+  permissions: PermissionKey[];
+  mfaMethod: 'totp' | 'email' | null;
 }
 export * from './formatos';
+export * from './pdfsettings';

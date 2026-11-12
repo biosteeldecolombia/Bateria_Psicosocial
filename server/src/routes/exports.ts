@@ -20,6 +20,8 @@ import { buildFormatoPdf } from '../pdf/formatos.js';
 import { loadFormatoContext } from '../results/formatos.js';
 import { FORMATOS, FORMATO_KINDS, type FormatoKind } from '@sanithelp/shared';
 import { buildPf16Sheet } from '../pdf/pf16.js';
+import { styleFor } from '../pdf/brand.js';
+import { getSetting } from '../settings.js';
 import { loadIndividual } from '../results/individual.js';
 
 const EXPORT_DIR = path.join(os.tmpdir(), 'sanithelp-exports');
@@ -35,8 +37,10 @@ const slug = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/
 export const exportRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
   // Documentos y expedientes: administrador, psicóloga y auxiliar administrativo (este último, solo de lo que se le asignó y con motivo).
-  const staff = app.requireReady('admin', 'psychologist', 'assistant');
+  const staff = app.requirePerm('exports.download');
   fs.mkdirSync(EXPORT_DIR, { recursive: true });
+  /** Apariencia vigente de los PDF (código, versión, colores y pie), editable desde «Formatos PDF». */
+  const pdfStyle = async (kind: Parameters<typeof styleFor>[1]) => styleFor(await getSetting<unknown>(db, 'pdf', {}), kind);
 
   /**
    * Datos de la profesional para el consentimiento y los informes: la responsable de la campaña (con su firma);
@@ -110,7 +114,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadDisc(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados DISC.' });
-    const bytes = await buildDiscReport(rec, await professionalOptional(req.auth!.user, c), new Date());
+    const bytes = await buildDiscReport(rec, await professionalOptional(req.auth!.user, c), new Date(), await pdfStyle('disc'));
     await audit(db, req.auth!.user.id, 'pdf.disc', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -127,7 +131,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadValanti(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados VALANTI.' });
-    const bytes = await buildValantiReport(rec, await professionalOptional(req.auth!.user, c), new Date());
+    const bytes = await buildValantiReport(rec, await professionalOptional(req.auth!.user, c), new Date(), await pdfStyle('valanti'));
     await audit(db, req.auth!.user.id, 'pdf.valanti', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -144,7 +148,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadAcrofobia(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene resultados de Acrofobia.' });
-    const bytes = await buildAcrofobiaReport(rec, await professionalOptional(req.auth!.user, c), new Date());
+    const bytes = await buildAcrofobiaReport(rec, await professionalOptional(req.auth!.user, c), new Date(), await pdfStyle('acrofobia'));
     await audit(db, req.auth!.user.id, 'pdf.acrofobia', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -186,7 +190,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     const [rec] = await loadClq(db, crypto, c.id, id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no tiene el CLQ completo.' });
     if (!rec.level) return reply.code(409).send({ error: 'Marca primero la interpretación del CLQ (bajo, moderado o alto) para descargar el PDF.' });
-    const bytes = await buildClqReport(rec, await professionalOptional(req.auth!.user, c), new Date());
+    const bytes = await buildClqReport(rec, await professionalOptional(req.auth!.user, c), new Date(), await pdfStyle('claustrofobia'));
     await audit(db, req.auth!.user.id, 'pdf.claustrofobia', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -203,7 +207,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     if (!c) return;
     const [rec] = await loadIndividual(db, crypto, c.id, 'pf16', id);
     if (!rec) return reply.code(404).send({ error: 'Esta persona aún no completó el 16PF.' });
-    const bytes = await buildPf16Sheet(rec, await professionalOptional(req.auth!.user, c), new Date());
+    const bytes = await buildPf16Sheet(rec, await professionalOptional(req.auth!.user, c), new Date(), await pdfStyle('pf16'));
     await audit(db, req.auth!.user.id, 'pdf.pf16', { type: 'participant', id });
     return reply
       .header('Content-Type', 'application/pdf')
@@ -228,16 +232,16 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       return e;
     };
     const wanted = new Set(ids);
-    if (kinds.includes('disc')) for (const r of await loadDisc(db, crypto, camp.id)) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Informe_DISC_${r.document}.pdf`, bytes: await buildDiscReport(r, professional, generatedAt) });
-    if (kinds.includes('valanti')) for (const r of await loadValanti(db, crypto, camp.id)) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Informe_VALANTI_${r.document}.pdf`, bytes: await buildValantiReport(r, professional, generatedAt) });
-    if (kinds.includes('pf16')) for (const r of await loadIndividual(db, crypto, camp.id, 'pf16')) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Hoja_16PF_${r.document}.pdf`, bytes: await buildPf16Sheet(r, professional, generatedAt) });
+    if (kinds.includes('disc')) for (const r of await loadDisc(db, crypto, camp.id)) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Informe_DISC_${r.document}.pdf`, bytes: await buildDiscReport(r, professional, generatedAt, await pdfStyle('disc')) });
+    if (kinds.includes('valanti')) for (const r of await loadValanti(db, crypto, camp.id)) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Informe_VALANTI_${r.document}.pdf`, bytes: await buildValantiReport(r, professional, generatedAt, await pdfStyle('valanti')) });
+    if (kinds.includes('pf16')) for (const r of await loadIndividual(db, crypto, camp.id, 'pf16')) if (wanted.has(r.participantId)) entry(r.participantId).docs.push({ name: `Hoja_16PF_${r.document}.pdf`, bytes: await buildPf16Sheet(r, professional, generatedAt, await pdfStyle('pf16')) });
     const parts = kinds.some((k) => k === 'acrofobia' || k === 'claustrofobia') ? await db.select().from(participants).where(inArray(participants.id, ids)) : [];
     const partOf = new Map(parts.map((p) => [p.id, p]));
     if (kinds.includes('acrofobia')) {
       for (const r of await loadAcrofobia(db, crypto, camp.id)) {
         if (!wanted.has(r.participantId)) continue;
         const e = entry(r.participantId);
-        e.docs.push({ name: `Informe_Acrofobia_${r.document}.pdf`, bytes: await buildAcrofobiaReport(r, professional, generatedAt) });
+        e.docs.push({ name: `Informe_Acrofobia_${r.document}.pdf`, bytes: await buildAcrofobiaReport(r, professional, generatedAt, await pdfStyle('acrofobia')) });
         const ctx = await loadFormatoContext(db, crypto, partOf.get(r.participantId)!, 'alturas');
         if (ctx.saved) e.docs.push({ name: `Formato_Alturas_${r.document}.pdf`, bytes: await buildFormatoPdf({ kind: 'alturas', data: ctx.saved.data, prefill: ctx.prefill, professional }) });
         else e.pending.push('Formato de evaluación · Trabajo en alturas (pendiente de la psicóloga)');
@@ -247,7 +251,7 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       for (const r of await loadClq(db, crypto, camp.id)) {
         if (!wanted.has(r.participantId)) continue;
         const e = entry(r.participantId);
-        if (r.level) e.docs.push({ name: `Informe_CLQ_${r.document}.pdf`, bytes: await buildClqReport(r, professional, generatedAt) });
+        if (r.level) e.docs.push({ name: `Informe_CLQ_${r.document}.pdf`, bytes: await buildClqReport(r, professional, generatedAt, await pdfStyle('claustrofobia')) });
         else e.pending.push('Informe CLQ (falta la interpretación de la psicóloga)');
         const ctx = await loadFormatoContext(db, crypto, partOf.get(r.participantId)!, 'confinados');
         if (ctx.saved) e.docs.push({ name: `Formato_EspaciosConfinados_${r.document}.pdf`, bytes: await buildFormatoPdf({ kind: 'confinados', data: ctx.saved.data, prefill: ctx.prefill, clq: { total: r.result.total, level: r.level }, professional }) });

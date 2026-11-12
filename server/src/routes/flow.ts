@@ -301,8 +301,8 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
     const dataEnc = crypto.encrypt(JSON.stringify({ answers, gates } satisfies StoredQ));
     await db
       .insert(questionnaireAnswers)
-      .values({ participantId: g.p.id, instrument: g.id, dataEnc, complete })
-      .onConflictDoUpdate({ target: [questionnaireAnswers.participantId, questionnaireAnswers.instrument], set: { dataEnc, complete, updatedAt: new Date() } });
+      .values({ participantId: g.p.id, instrument: g.id, dataEnc, complete, completedAt: complete ? new Date() : null })
+      .onConflictDoUpdate({ target: [questionnaireAnswers.participantId, questionnaireAnswers.instrument], set: { dataEnc, complete, completedAt: complete ? new Date() : null, updatedAt: new Date() } });
     return stateOf(g.p);
   });
 
@@ -330,8 +330,8 @@ export const flowRoutes: FastifyPluginAsync = async (app) => {
     const dataEnc = crypto.encrypt(JSON.stringify({ answers, gates: {}, ...(instrument === 'disc' ? { v: DISC_DATA_VERSION } : {}) } satisfies StoredQ));
     await db
       .insert(questionnaireAnswers)
-      .values({ participantId: p.id, instrument, dataEnc, complete })
-      .onConflictDoUpdate({ target: [questionnaireAnswers.participantId, questionnaireAnswers.instrument], set: { dataEnc, complete, updatedAt: new Date() } });
+      .values({ participantId: p.id, instrument, dataEnc, complete, completedAt: complete ? new Date() : null })
+      .onConflictDoUpdate({ target: [questionnaireAnswers.participantId, questionnaireAnswers.instrument], set: { dataEnc, complete, completedAt: complete ? new Date() : null, updatedAt: new Date() } });
     return stateOf(p);
   }
 

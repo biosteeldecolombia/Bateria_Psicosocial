@@ -6,7 +6,11 @@ import { SignatureEditor } from './Signature';
 import { Audit } from './Audit';
 import { ConsentHeader } from './flow/ConsentHeader';
 import { Icon, type IconName } from './icons';
-import { EmptyState, Modal, RowMenu, SecretModal, SelectAll, StatusBadge, useAction, type Secret } from './ui';
+import { CopyButton, EmptyState, Modal, RowMenu, SecretModal, SelectAll, StatusBadge, useAction, type Secret } from './ui';
+import { Workflow } from './Workflow';
+import { RolesMatrix } from './RolesMatrix';
+import { SettingsPanel } from './SettingsPanel';
+import { PdfFormats } from './PdfFormats';
 import { Users, type UserRow } from './Users';
 import { Loading, PageHero } from './BrandLoader';
 
@@ -23,9 +27,85 @@ function CampaignStats({ s }: { s: Campaign['stats'] }) {
   );
 }
 
-type TabKey = 'inicio' | 'empresas' | 'campanas' | 'usuarios' | 'auditoria' | 'perfil';
+type TabKey = 'inicio' | 'flujo' | 'empresas' | 'campanas' | 'usuarios' | 'auditoria' | 'configuracion' | 'formatos' | 'perfil';
 /** Aviso de formatos de evaluación por campaña: pendientes (psicóloga) o listos para descargar (auxiliar). */
 interface FormatoNote { campaignId: string; campaignName: string; companyName: string; kind: 'alturas' | 'confinados'; count: number }
+
+/** Cambio de contraseña por la propia persona. Pide la actual y aplica la política de contraseñas. */
+function PasswordCard() {
+  const act = useAction();
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [again, setAgain] = useState('');
+  const [show, setShow] = useState(false);
+  const [done, setDone] = useState(false);
+  const mismatch = again !== '' && next !== again;
+  return (
+    <section className="panel pad" aria-labelledby="pw" style={{ maxWidth: '40rem', marginBottom: '1rem' }}>
+      <h2 id="pw" className="panel-title"><Icon name="lock" size={20} /> Cambiar mi contraseña</h2>
+      <p className="muted">Mínimo 12 caracteres, sin palabras comunes ni tu nombre o correo. Al cambiarla se cierran tus otras sesiones.</p>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      {done && <div className="alert ok" role="status">Listo: tu contraseña se cambió.</div>}
+      <form
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void act.run(async () => {
+            await api('POST', '/api/auth/change-password', { currentPassword: cur, newPassword: next });
+            setCur(''); setNext(''); setAgain(''); setDone(true);
+          });
+        }}
+      >
+        <label htmlFor="pw-cur">Contraseña actual</label>
+        <input id="pw-cur" type={show ? 'text' : 'password'} autoComplete="current-password" value={cur} onChange={(e) => { setCur(e.target.value); setDone(false); }} />
+        <label htmlFor="pw-n1">Contraseña nueva</label>
+        <input id="pw-n1" type={show ? 'text' : 'password'} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+        <label htmlFor="pw-n2">Repite la contraseña nueva</label>
+        <input id="pw-n2" type={show ? 'text' : 'password'} autoComplete="new-password" aria-invalid={mismatch} value={again} onChange={(e) => setAgain(e.target.value)} />
+        {mismatch && <p className="hint" role="alert">Las contraseñas no coinciden.</p>}
+        <label className="check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Mostrar contraseñas</label>
+        <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="btn" disabled={act.busy || !cur || next.length < 12 || next !== again}><Icon name="check" /> Cambiar contraseña</button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+/** Enviar la credencial de la campaña por correo a una o varias personas (para responder desde el celular). */
+function EmailAccessModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
+  const act = useAction();
+  const [raw, setRaw] = useState('');
+  const [status, setStatus] = useState<{ enabled: boolean } | null>(null);
+  const [result, setResult] = useState<{ sent: string[]; failed: string[] } | null>(null);
+  useEffect(() => { api<{ enabled: boolean }>('GET', '/api/mail/status').then(setStatus).catch(() => setStatus({ enabled: false })); }, []);
+  const emails = [...new Set(raw.split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
+  const valid = emails.length > 0 && emails.length <= 20 && emails.every((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
+  return (
+    <Modal title={`Enviar credenciales · ${campaign.name}`} icon="mail" size="sm" onClose={onClose}>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      {status && !status.enabled ? (
+        <p className="muted">El envío por correo todavía no está configurado. Pídele al administrador que cargue las llaves de Outlook (guía en <code>docs/CORREO_OUTLOOK.md</code>).</p>
+      ) : result ? (
+        <>
+          {result.sent.length > 0 && <div className="alert ok" role="status">Enviado a {result.sent.length} {result.sent.length === 1 ? 'dirección' : 'direcciones'}: {result.sent.join(', ')}</div>}
+          {result.failed.length > 0 && <div className="alert error" role="alert">No se pudo enviar a: {result.failed.join(', ')}. Revisa que estén bien escritas.</div>}
+          <div className="dialog-actions"><button className="btn" onClick={onClose}>Listo</button></div>
+        </>
+      ) : (
+        <form noValidate onSubmit={(e) => { e.preventDefault(); void act.run(async () => setResult(await api('POST', `/api/campaigns/${campaign.id}/email-access`, { emails }))); }}>
+          <label htmlFor="ea-m">Correos de las personas (separados por coma, espacio o salto de línea)</label>
+          <textarea id="ea-m" rows={4} value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="ana@empresa.com, luis@empresa.com" />
+          <p className="muted">Cada persona recibe su propio correo con el usuario, la contraseña y el enlace para responder desde su celular. {emails.length > 0 && <strong>{emails.length} {emails.length === 1 ? 'destinatario' : 'destinatarios'}.</strong>} Las direcciones no se guardan.</p>
+          <div className="dialog-actions">
+            <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+            <button className="btn" disabled={act.busy || !valid || !status}><Icon name="mail" /> Enviar</button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
 
 /** Firma de la psicóloga: se imprime en los documentos de las campañas de las que es responsable. */
 function SignatureCard() {
@@ -289,11 +369,19 @@ export function Management({ me }: { me: MeResponse }) {
   // de evaluación y el perfil profesional.
   const isAssistant = me.role === 'assistant';
   const isPsychologist = me.role === 'psychologist';
+  const can = (k: string) => me.permissions.includes(k as never);
+  const canUsers = can('users.manage');
+  const canCompanies = can('companies.manage');
   const tabs: { key: TabKey; label: string; icon: IconName }[] = [
     { key: 'inicio', label: 'Inicio', icon: 'home' },
+    ...(can('workflow.view') ? [{ key: 'flujo' as const, label: 'Flujo de trabajo', icon: 'refresh' as const }] : []),
     { key: 'empresas', label: 'Empresas', icon: 'building' },
     { key: 'campanas', label: 'Campañas', icon: 'clipboard' },
-    ...(isAdmin ? [{ key: 'usuarios' as const, label: 'Usuarios', icon: 'users' as const }, { key: 'auditoria' as const, label: 'Auditoría', icon: 'shield' as const }] : isPsychologist ? [{ key: 'perfil' as const, label: 'Mi perfil', icon: 'user' as const }] : []),
+    ...(canUsers || can('roles.manage') ? [{ key: 'usuarios' as const, label: 'Usuarios', icon: 'users' as const }] : []),
+    ...(can('audit.view') ? [{ key: 'auditoria' as const, label: 'Auditoría', icon: 'shield' as const }] : []),
+    ...(can('settings.manage') ? [{ key: 'configuracion' as const, label: 'Configuración', icon: 'power' as const }] : []),
+    ...(can('templates.edit') ? [{ key: 'formatos' as const, label: 'Formatos PDF', icon: 'folder' as const }] : []),
+    { key: 'perfil' as const, label: 'Mi cuenta', icon: 'user' as const },
   ];
   const fromHash = (): TabKey => {
     const h = window.location.hash.replace('#/', '') as TabKey;
@@ -315,6 +403,9 @@ export function Management({ me }: { me: MeResponse }) {
   const [newCompany, setNewCompany] = useState(false);
   const [newCampaign, setNewCampaign] = useState(false);
   const [newUser, setNewUser] = useState(false);
+  const [usersSub, setUsersSub] = useState<'cuentas' | 'roles'>('cuentas');
+  const [emailCampaign, setEmailCampaign] = useState<Campaign | null>(null);
+  const [alerts, setAlerts] = useState<{ key: string; severity: string; text: string }[]>([]);
   const [editCompany, setEditCompany] = useState<Company | null>(null);
   const [delCompany, setDelCompany] = useState<Company | null>(null);
   const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
@@ -353,6 +444,9 @@ export function Management({ me }: { me: MeResponse }) {
       .then((r) => setProfileDone(!!r.professionalDocument && !!r.professionalRegistry))
       .catch(() => undefined);
   }, [isPsychologist]);
+  const loadAlerts = useCallback(() => {
+    api<{ items: { key: string; severity: string; text: string }[] }>('GET', '/api/notifications').then((r) => setAlerts(r.items)).catch(() => undefined);
+  }, []);
   const loadNotes = useCallback(() => {
     if (!isPsychologist && !isAssistant) return;
     api<{ pending: FormatoNote[]; ready: FormatoNote[] }>('GET', '/api/notifications/formatos')
@@ -364,9 +458,10 @@ export function Management({ me }: { me: MeResponse }) {
     void loadUsers().catch(() => setUsersLoaded(true));
     checkProfile();
     loadNotes();
-  }, [load, loadUsers, checkProfile, loadNotes]);
+    loadAlerts();
+  }, [load, loadUsers, checkProfile, loadNotes, loadAlerts]);
   // Se actualizan al cambiar de sección y cada par de minutos (la psicóloga guarda formatos mientras la auxiliar trabaja)
-  useEffect(() => { loadNotes(); }, [tab, analysis, loadNotes]);
+  useEffect(() => { loadNotes(); loadAlerts(); }, [tab, analysis, loadNotes, loadAlerts]);
   useEffect(() => {
     const t = setInterval(loadNotes, 120_000);
     return () => clearInterval(t);
@@ -387,9 +482,9 @@ export function Management({ me }: { me: MeResponse }) {
   };
 
   const kpis: { key: TabKey; icon: IconName; value: number; label: string; hint: string; add?: { label: string; onClick: () => void } }[] = [
-    { key: 'empresas', icon: 'building', value: activeCompanies.length, label: isAdmin ? 'Empresas activas' : 'Empresas asignadas', hint: 'Ver empresas', add: isAdmin ? { label: 'Nueva empresa', onClick: () => setNewCompany(true) } : undefined },
-    { key: 'campanas', icon: 'clipboard', value: openCampaigns.length, label: 'Campañas abiertas', hint: `${campaigns.length} en total`, add: { label: 'Nueva campaña', onClick: () => setNewCampaign(true) } },
-    ...(isAdmin ? [{ key: 'usuarios' as const, icon: 'users' as const, value: activeUsers.length, label: 'Usuarios activos', hint: `${users.length} cuentas`, add: { label: 'Nueva cuenta', onClick: () => { setTab('usuarios'); setNewUser(true); } } }] : []),
+    { key: 'empresas', icon: 'building', value: activeCompanies.length, label: isAdmin ? 'Empresas activas' : 'Empresas asignadas', hint: 'Ver empresas', add: canCompanies ? { label: 'Nueva empresa', onClick: () => setNewCompany(true) } : undefined },
+    { key: 'campanas', icon: 'clipboard', value: openCampaigns.length, label: 'Campañas abiertas', hint: `${campaigns.length} en total`, add: can('campaigns.create') ? { label: 'Nueva campaña', onClick: () => setNewCampaign(true) } : undefined },
+    ...(canUsers ? [{ key: 'usuarios' as const, icon: 'users' as const, value: activeUsers.length, label: 'Usuarios activos', hint: `${users.length} cuentas`, add: { label: 'Nueva cuenta', onClick: () => { setTab('usuarios'); setNewUser(true); } } }] : []),
   ];
 
   const shownCampaigns = campaigns.filter((c) => (!coFilter || c.companyId === coFilter) && (!stFilter || c.status === stFilter));
@@ -407,9 +502,9 @@ export function Management({ me }: { me: MeResponse }) {
             </button>
           ))}
         </div>
-        {tab === 'empresas' && isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Nueva empresa</button>}
-        {tab === 'campanas' && !analysis && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}
-        {tab === 'usuarios' && <button className="btn" onClick={() => setNewUser(true)}><Icon name="plus" /> Nueva cuenta</button>}
+        {tab === 'empresas' && canCompanies && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Nueva empresa</button>}
+        {tab === 'campanas' && !analysis && can('campaigns.create') && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}
+        {tab === 'usuarios' && canUsers && usersSub === 'cuentas' && <button className="btn" onClick={() => setNewUser(true)}><Icon name="plus" /> Nueva cuenta</button>}
       </nav>
 
       <div role="tabpanel" id="staff-panel" aria-labelledby={`tab-${tab}`} tabIndex={0}>
@@ -422,6 +517,15 @@ export function Management({ me }: { me: MeResponse }) {
               <div className="alert error banner" role="status">
                 <span>Completa tu perfil profesional para poder descargar expedientes en PDF.</span>
                 <button className="btn secondary sm" onClick={() => setTab('perfil')}>Completar perfil <Icon name="arrow" /></button>
+              </div>
+            )}
+            {alerts.length > 0 && (
+              <div className="alert ok banner" role="status">
+                <span><strong>Pendientes</strong></span>
+                <ul className="list" style={{ margin: '0.5rem 0 0' }}>
+                  {alerts.map((a) => <li key={a.key}>{a.text}</li>)}
+                </ul>
+                {can('workflow.view') && <button className="btn secondary sm" style={{ marginTop: '0.5rem' }} onClick={() => setTab('flujo')}>Ver el flujo de trabajo <Icon name="arrow" /></button>}
               </div>
             )}
             {notesTotal > 0 && (
@@ -497,6 +601,8 @@ export function Management({ me }: { me: MeResponse }) {
           </>
         )}
 
+        {tab === 'flujo' && <Workflow me={me} onOpenCampaign={(id) => { const c = campaigns.find((x) => x.id === id); if (c) { setTab('campanas'); setAnalysis(c); } }} />}
+
         {tab === 'empresas' && (
           <>
             <div className="page-head row-between">
@@ -508,7 +614,7 @@ export function Management({ me }: { me: MeResponse }) {
             </div>
             {!loaded ? <Loading /> : shownCompanies.length === 0 ? (
               <EmptyState icon="building" text={isAdmin ? 'Aún no hay empresas.' : 'Aún no tienes empresas asignadas. Pídele al administrador que te asigne una.'}>
-                {isAdmin && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Crear empresa</button>}
+                {canCompanies && <button className="btn" onClick={() => setNewCompany(true)}><Icon name="plus" /> Crear empresa</button>}
               </EmptyState>
             ) : (
               <div className="card-grid">
@@ -521,7 +627,7 @@ export function Management({ me }: { me: MeResponse }) {
                         <h2 className="panel-title"><Icon name="building" size={20} /> {c.name}</h2>
                         <span className="head-actions">
                           <StatusBadge on={c.active} onText="Activa" offText="Inactiva" />
-                          {isAdmin && (
+                          {canCompanies && (
                             <RowMenu
                               label={`Más acciones para ${c.name}`}
                               items={[
@@ -607,30 +713,33 @@ export function Management({ me }: { me: MeResponse }) {
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
                         <td className="actions">
-                          <button className="icon-btn" title="Ver usuario y contraseña" aria-label={`Ver usuario y contraseña de ${c.name}`} onClick={() => void act.run(async () => {
-                            const r = await api<{ username: string; password: string | null }>('GET', `/api/campaigns/${c.id}/access`);
-                            if (r.password === null) window.alert('Esta campaña es anterior a esta función y su contraseña no quedó guardada. Usa «Nueva contraseña de acceso» en el menú para generar una que sí se pueda consultar.');
-                            else setSecret({ title: `Acceso de ${c.name}`, username: r.username, password: r.password, view: true });
-                          })}><Icon name="lock" /></button>
+                          {can('campaigns.credentials') && (
+                            <button className="icon-btn" title="Ver usuario y contraseña (llave)" aria-label={`Ver usuario y contraseña de ${c.name}`} onClick={() => void act.run(async () => {
+                              const r = await api<{ username: string; password: string | null }>('GET', `/api/campaigns/${c.id}/access`);
+                              if (r.password === null) window.alert('Esta campaña es anterior a esta función y su contraseña no quedó guardada. Usa «Nueva contraseña de acceso» en el menú para generar una que sí se pueda consultar.');
+                              else setSecret({ title: `Acceso de ${c.name}`, username: r.username, password: r.password, view: true });
+                            })}><Icon name="key" /></button>
+                          )}
+                          {can('campaigns.email') && c.status === 'open' && <button className="icon-btn" title="Enviar credenciales por correo" aria-label={`Enviar credenciales de ${c.name} por correo`} onClick={() => setEmailCampaign(c)}><Icon name="mail" /></button>}
                           <button className="btn sm" onClick={() => setAnalysis(c)}><Icon name="chart" /> Resultados{noteOf(c.id) > 0 && <span className="chip" style={{ marginLeft: 6 }} title={isAssistant ? 'Formatos listos para descargar' : 'Formatos pendientes por diligenciar'}>{noteOf(c.id)}</span>}</button>
                           <RowMenu
                             label={`Más acciones para ${c.name}`}
                             items={[
-                              { label: 'Editar nombre', icon: 'edit', onSelect: () => setEditCampaign(c) },
-                              {
-                                label: 'Nueva contraseña de acceso', icon: 'key', onSelect: () => void act.run(async () => {
+                              ...(can('campaigns.edit') ? [{ label: 'Editar nombre', icon: 'edit' as const, onSelect: () => setEditCampaign(c) }] : []),
+                              ...(can('campaigns.credentials') ? [{
+                                label: 'Nueva contraseña de acceso', icon: 'key' as const, onSelect: () => void act.run(async () => {
                                   if (!window.confirm('Se generará una contraseña nueva y la anterior dejará de funcionar. ¿Continuar?')) return;
                                   const r = await api<{ username: string; password: string }>('POST', `/api/campaigns/${c.id}/regenerate-access`);
-                                  setSecret({ title: `Nueva contraseña para ${c.name}`, ...r });
+                                  setSecret({ title: `Nueva contraseña para ${c.name}`, ...r, view: true });
                                 }),
-                              },
-                              {
-                                label: c.status === 'open' ? 'Cerrar campaña' : 'Reabrir campaña', icon: c.status === 'open' ? 'lock' : 'refresh', onSelect: () => void act.run(async () => {
+                              }] : []),
+                              ...(can('campaigns.edit') ? [{
+                                label: c.status === 'open' ? 'Cerrar campaña' : 'Reabrir campaña', icon: (c.status === 'open' ? 'lock' : 'refresh') as IconName, onSelect: () => void act.run(async () => {
                                   await api('POST', `/api/campaigns/${c.id}/status`, { status: c.status === 'open' ? 'closed' : 'open' });
                                   await load();
                                 }),
-                              },
-                              { label: 'Eliminar campaña', icon: 'trash', danger: true, onSelect: () => setDelCampaign(c) },
+                              }] : []),
+                              ...(can('campaigns.delete') ? [{ label: 'Eliminar campaña', icon: 'trash' as const, danger: true, onSelect: () => setDelCampaign(c) }] : []),
                             ]}
                           />
                         </td>
@@ -643,13 +752,18 @@ export function Management({ me }: { me: MeResponse }) {
           </>
         ))}
 
-        {tab === 'usuarios' && isAdmin && (
+        {tab === 'usuarios' && (canUsers || can('roles.manage')) && (
           <>
             <div className="page-head">
               <h1>Usuarios</h1>
-              <p className="muted">Cuentas de personas con su rol, empresas asignadas y permisos. Las credenciales de colaboradores se gestionan en cada campaña.</p>
+              <p className="muted">Cuentas de personas, y qué puede ver y hacer cada rol. Las credenciales de colaboradores se gestionan en cada campaña.</p>
             </div>
-            <Users
+            <div className="seg" role="group" aria-label="Sección de usuarios" style={{ marginBottom: '1rem' }}>
+              <label><input type="radio" name="usub" checked={usersSub === 'cuentas'} onChange={() => setUsersSub('cuentas')} /><span>Cuentas</span></label>
+              {can('roles.manage') && <label><input type="radio" name="usub" checked={usersSub === 'roles'} onChange={() => setUsersSub('roles')} /><span>Roles y permisos</span></label>}
+            </div>
+            {usersSub === 'roles' && can('roles.manage') && <RolesMatrix />}
+            {usersSub === 'cuentas' && <Users
               rows={users}
               loaded={usersLoaded}
               companies={companies}
@@ -658,17 +772,26 @@ export function Management({ me }: { me: MeResponse }) {
               onSecret={(title, username, password) => setSecret({ title, username, password })}
               openNew={newUser}
               onCloseNew={() => setNewUser(false)}
-            />
+            />}
           </>
         )}
 
-        {tab === 'auditoria' && isAdmin && <Audit />}
+        {tab === 'auditoria' && can('audit.view') && <Audit />}
 
-        {tab === 'perfil' && me.role === 'psychologist' && (
+        {tab === 'configuracion' && can('settings.manage') && <SettingsPanel />}
+
+        {tab === 'formatos' && can('templates.edit') && <PdfFormats />}
+
+        {tab === 'perfil' && (
           <>
-            <div className="page-head"><h1>Mi perfil</h1></div>
-            <ProfileCard onSaved={checkProfile} />
-            <SignatureCard />
+            <div className="page-head"><h1>Mi cuenta</h1></div>
+            <PasswordCard />
+            {me.role === 'psychologist' && (
+              <>
+                <ProfileCard onSaved={checkProfile} />
+                <SignatureCard />
+              </>
+            )}
           </>
         )}
       </div>
@@ -698,6 +821,7 @@ export function Management({ me }: { me: MeResponse }) {
           onClose={() => setDelCampaign(null)}
         />
       )}
+      {emailCampaign && <EmailAccessModal campaign={emailCampaign} onClose={() => setEmailCampaign(null)} />}
       {secret && <SecretModal s={secret} onClose={() => setSecret(null)} />}
     </div>
   );

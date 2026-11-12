@@ -23,7 +23,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return rows.length === new Set(ids).size;
   }
 
-  app.post('/admin/companies', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.post('/admin/companies', { preHandler: app.requirePerm('companies.manage') }, async (req, reply) => {
     const body = createCompanySchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const [dup] = await db.select({ id: companies.id }).from(companies).where(eq(companies.code, body.data.code)).limit(1);
@@ -37,7 +37,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Edita una empresa. Al desactivarla se cierran sus campañas abiertas (las credenciales dejan de funcionar). */
-  app.patch('/admin/companies/:id', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.patch('/admin/companies/:id', { preHandler: app.requirePerm('companies.manage') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = updateCompanySchema.safeParse(req.body);
     if (!uuidParam(id) || !body.success) return reply.code(400).send({ error: 'Datos inválidos' });
@@ -79,7 +79,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Elimina una empresa solo si no tiene campañas ni cuentas de empresa cliente. Exige la contraseña. */
-  app.delete('/admin/companies/:id', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.delete('/admin/companies/:id', { preHandler: app.requirePerm('companies.manage') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!uuidParam(id)) return reply.code(400).send({ error: 'Identificador inválido' });
     const pw = (req.body as { password?: unknown } | null)?.password;
@@ -99,7 +99,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true };
   });
 
-  app.get('/companies', { preHandler: app.requireReady('admin', 'psychologist', 'assistant') }, async (req) => {
+  app.get('/companies', { preHandler: app.requirePerm('campaigns.view') }, async (req) => {
     const actor = req.auth!.user;
     if (actor.role === 'admin') return db.select().from(companies).orderBy(companies.name);
     let ids: string[];
@@ -124,7 +124,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return null;
   }
 
-  app.post('/admin/users', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.post('/admin/users', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const body = createUserSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const input = body.data;
@@ -153,6 +153,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         professionalDocumentEnc: input.professionalDocument ? crypto.encrypt(input.professionalDocument) : null,
         companyId: input.companyId ?? null,
         passwordHash: await hashPassword(password),
+        initialPasswordEnc: crypto.encrypt(password),
       })
       .returning({ id: users.id });
 
@@ -164,12 +165,12 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       if (input.assignedCampaignIds?.length) await db.insert(assistantCampaigns).values([...new Set(input.assignedCampaignIds)].map((campaignId) => ({ userId: row!.id, campaignId })));
     }
     await audit(db, req.auth!.user.id, 'user.created', { type: 'user', id: row!.id }, { role: input.role, mfaRequired: MFA_ROLES.includes(input.role) });
-    // La contraseña se muestra una sola vez; no se guarda en claro.
+    // La contraseña temporal queda cifrada y se puede volver a ver (llave) hasta que la persona la cambie.
     return reply.code(201).send({ id: row!.id, username: input.username, password });
   });
 
   /** Cuentas de personas (no incluye las credenciales compartidas de colaboradores), con sus empresas asignadas. Solo administrador. */
-  app.get('/admin/users', { preHandler: app.requireReady('admin') }, async () => {
+  app.get('/admin/users', { preHandler: app.requirePerm('users.manage') }, async () => {
     const rows = await db.select().from(users).where(inArray(users.role, ['admin', 'psychologist', 'assistant', 'company'])).orderBy(users.createdAt);
     const cos = await db.select({ id: companies.id, name: companies.name, code: companies.code }).from(companies);
     const coById = new Map(cos.map((c) => [c.id, c]));
@@ -197,6 +198,9 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         active: u.active,
         mfaRequired: MFA_ROLES.includes(u.role),
         mfaEnabled: u.mfaEnabled,
+        mfaMethod: u.mfaMethod,
+        hasTempPassword: !!u.initialPasswordEnc,
+        passwordChangedAt: u.passwordChangedAt,
         locked: !!u.lockedUntil && u.lockedUntil > new Date(),
         createdAt: u.createdAt,
         lastLoginAt: u.lastLoginAt,
@@ -214,7 +218,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   }
 
   /** El administrador ve, carga, reemplaza o quita la imagen de la firma de una psicóloga. */
-  app.get('/admin/users/:id/signature', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.get('/admin/users/:id/signature', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const u = await psychologist((req.params as { id: string }).id);
     if (!u) return reply.code(404).send({ error: 'Psicóloga no encontrada' });
     await audit(db, req.auth!.user.id, 'user.signature_viewed', { type: 'user', id: u.id });
@@ -222,7 +226,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return { signature: signatureOfEnc((v) => crypto.decrypt(v), u.signatureEnc) };
   });
 
-  app.put('/admin/users/:id/signature', { preHandler: app.requireReady('admin'), bodyLimit: 700_000 }, async (req, reply) => {
+  app.put('/admin/users/:id/signature', { preHandler: app.requirePerm('users.manage'), bodyLimit: 700_000 }, async (req, reply) => {
     const u = await psychologist((req.params as { id: string }).id);
     if (!u) return reply.code(404).send({ error: 'Psicóloga no encontrada' });
     const sig = parseSignature((req.body as { image?: unknown } | null)?.image);
@@ -232,7 +236,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true };
   });
 
-  app.delete('/admin/users/:id/signature', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.delete('/admin/users/:id/signature', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const u = await psychologist((req.params as { id: string }).id);
     if (!u) return reply.code(404).send({ error: 'Psicóloga no encontrada' });
     await db.update(users).set({ signatureEnc: null }).where(eq(users.id, u.id));
@@ -241,7 +245,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Reemplaza las empresas que atiende una psicóloga. Solo administrador. */
-  app.put('/admin/users/:id/companies', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.put('/admin/users/:id/companies', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const ids = (req.body as { companyIds?: unknown })?.companyIds;
     if (!uuidParam(id) || !Array.isArray(ids) || !ids.every(uuidParam)) return reply.code(400).send({ error: 'Datos inválidos' });
@@ -264,7 +268,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
    * Edita los datos, el rol y las empresas de una cuenta de persona. Solo administrador.
    * Cambiar el rol o el usuario cierra las sesiones abiertas de esa cuenta.
    */
-  app.put('/admin/users/:id', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.put('/admin/users/:id', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = updateUserSchema.safeParse(req.body);
     if (!uuidParam(id) || !body.success) return reply.code(400).send({ error: 'Datos inválidos' });
@@ -342,7 +346,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
    * Restablece la contraseña de una cuenta de persona y cierra sus sesiones. Solo administrador.
    * Si el cuerpo trae `password`, se usa esa (validada con la política); si no, se genera una.
    */
-  app.post('/admin/users/:id/reset-password', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  app.post('/admin/users/:id/reset-password', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!uuidParam(id)) return reply.code(400).send({ error: 'Identificador inválido' });
     const [target] = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -357,13 +361,31 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       if (policy) return reply.code(400).send({ error: policy });
       password = chosen;
     }
-    await db.update(users).set({ passwordHash: await hashPassword(password), failedAttempts: 0, lockedUntil: null }).where(eq(users.id, id));
+    await db.update(users).set({ passwordHash: await hashPassword(password), initialPasswordEnc: crypto.encrypt(password), passwordChangedAt: null, failedAttempts: 0, lockedUntil: null }).where(eq(users.id, id));
     await revokeUserSessions(db, id);
     await audit(db, req.auth!.user.id, 'user.password_reset', { type: 'user', id }, { chosenByAdmin: chosen !== undefined && chosen !== '' });
     return { password };
   });
 
-  app.post('/admin/users/:id/active', { preHandler: app.requireReady('admin') }, async (req, reply) => {
+  /**
+   * Llave: usuario y contraseña temporal de una cuenta, para volver a entregarla. Solo existe mientras la persona no haya cambiado
+   * la contraseña por una propia (al cambiarla se borra y nadie más puede verla, tampoco el administrador).
+   */
+  app.get('/admin/users/:id/credential', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!uuidParam(id)) return reply.code(400).send({ error: 'Identificador inválido' });
+    const [target] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (!target || target.role === 'collaborator') return reply.code(404).send({ error: 'Usuario no encontrado' });
+    await audit(db, req.auth!.user.id, 'user.credential_viewed', { type: 'user', id });
+    reply.header('Cache-Control', 'no-store');
+    return {
+      username: crypto.decrypt(target.usernameEnc),
+      password: target.initialPasswordEnc ? crypto.decrypt(target.initialPasswordEnc) : null,
+      changedByUser: !target.initialPasswordEnc && !!target.passwordChangedAt,
+    };
+  });
+
+  app.post('/admin/users/:id/active', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const active = (req.body as { active?: unknown })?.active;
     if (!uuidParam(id) || typeof active !== 'boolean') return reply.code(400).send({ error: 'Datos inválidos' });

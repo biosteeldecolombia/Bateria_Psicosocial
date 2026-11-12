@@ -4,6 +4,9 @@ import { randomInt } from 'node:crypto';
 import { resumeParticipationSchema, startParticipationSchema } from '@sanithelp/shared';
 import { participants, sessions } from '../db/schema.js';
 import { audit, buildMe, loadAuth } from '../auth/service.js';
+import { campaigns } from '../db/schema.js';
+import { resumeCodeEmail } from '../mail/templates.js';
+import { setStage } from '../workflow/service.js';
 
 const MAX_RESUME_ATTEMPTS = 5;
 const RESUME_LOCK_MINUTES = 15;
@@ -21,7 +24,7 @@ export const normalizeCode = (c: string) => c.toUpperCase().replace(/[^A-Z0-9]/g
  * lo que las separa es el documento y un código personal que solo ellas conocen.
  */
 export const participationRoutes: FastifyPluginAsync = async (app) => {
-  const { db, crypto, cookieName, cfg } = app.appCtx;
+  const { db, crypto, cookieName, cfg, mailer } = app.appCtx;
   const only = app.requireReady('collaborator');
   const limit = {
     max: cfg.NODE_ENV === 'test' ? 10_000 : 10,
@@ -60,7 +63,19 @@ export const participationRoutes: FastifyPluginAsync = async (app) => {
       .returning({ id: participants.id });
     await bind(session.id, p!.id);
     await audit(db, user.id, 'participant.started', { type: 'participant', id: p!.id });
-    return { resumeCode: code, me: await meOf(req.cookies[cookieName]) };
+    await setStage(db, user.campaignId!, 'in_progress', null, 'Primera persona empezó a responder').catch(() => undefined);
+    // Si dejó su correo, se le envía el código para que no lo pierda. El correo no se guarda en ninguna parte.
+    let emailSent = false;
+    if (body.data.email && mailer.enabled) {
+      const [camp] = await db.select({ name: campaigns.name }).from(campaigns).where(eq(campaigns.id, user.campaignId!)).limit(1);
+      try {
+        await mailer.send(resumeCodeEmail({ to: body.data.email, campaignName: camp?.name ?? '', code, url: cfg.APP_BASE_URL }));
+        emailSent = true;
+      } catch (e) {
+        req.log.error({ err: (e as Error).message }, 'No se pudo enviar el código por correo');
+      }
+    }
+    return { resumeCode: code, emailSent, emailAvailable: mailer.enabled, me: await meOf(req.cookies[cookieName]) };
   });
 
   /** Retomar: documento + código personal. Mensaje genérico ante cualquier fallo y bloqueo tras 5 intentos. */

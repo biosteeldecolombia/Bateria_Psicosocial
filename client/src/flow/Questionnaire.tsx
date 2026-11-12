@@ -4,6 +4,7 @@ import { api, ApiError } from '../api';
 import { usePrefs } from '../prefs';
 import type { FlowState } from './Flow';
 import { Loading } from '../BrandLoader';
+import { AnswerModePicker, ScaleInput, resolveMode, useAnswerMode } from './ScaleInput';
 
 type Gates = { clients?: boolean; boss?: boolean };
 interface Page {
@@ -34,6 +35,7 @@ function buildPages(def: QuestionnaireDef, focus: boolean): Page[] {
 
 export function Questionnaire({ id, def, onDone }: { id: string; def: QuestionnaireDef; onDone: (s: FlowState) => void }) {
   const { prefs } = usePrefs();
+  const [answerMode, setAnswerMode] = useAnswerMode();
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [gates, setGates] = useState<Gates>({});
   const [loaded, setLoaded] = useState(false);
@@ -116,7 +118,8 @@ export function Questionnaire({ id, def, onDone }: { id: string; def: Questionna
         <h1 id="t" ref={titleRef} tabIndex={-1}>{def.title}</h1>
         <h2>Instrucciones</h2>
         {def.instructions.map((p, i) => <p key={i}>{p}</p>)}
-        <p className="hint">En esta versión digital, haz clic en la opción que elijas. Puedes cambiarla mientras no cierres el cuestionario. Tu avance se guarda automáticamente.</p>
+        <AnswerModePicker mode={answerMode} onChange={setAnswerMode} />
+        <p className="hint">En esta versión digital, elige la opción que corresponda (puedes cambiar la forma de responder cuando quieras: botones, deslizador, estrellas…). Puedes cambiarla mientras no cierres el cuestionario. Tu avance se guarda automáticamente.</p>
         <button className="btn block" onClick={() => setStarted(true)}>Comenzar</button>
       </section>
     );
@@ -170,6 +173,7 @@ export function Questionnaire({ id, def, onDone }: { id: string; def: Questionna
         <progress max={applicable.length} value={answeredCount} aria-label="Progreso del cuestionario" />
         <span>{answeredCount} de {applicable.length} respondidas · Página {pageIdx + 1} de {pages.length}</span>
       </div>
+      <AnswerModePicker mode={answerMode} onChange={setAnswerMode} />
       {page.headings.map((h) => <p key={h} className="section-note">{h}</p>)}
       {page.gate && (
         <fieldset className="item" id="gate" aria-describedby={gateMissing ? 'gate-err' : undefined}>
@@ -185,14 +189,7 @@ export function Questionnaire({ id, def, onDone }: { id: string; def: Questionna
       {shown.map((it) => (
         <fieldset className={`item${missing.has(it.n) ? ' missing' : ''}`} id={`it${it.n}`} key={it.n} aria-describedby={missing.has(it.n) ? `er${it.n}` : undefined}>
           <legend><span className="qn">{it.n}.</span> {it.t}</legend>
-          <div className="seg wrap scale">
-            {def.scale.map((label, idx) => (
-              <label key={label}>
-                <input type="radio" name={`it${it.n}`} checked={answers[it.n] === idx} onChange={() => setAnswer(it.n, idx)} />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
+          <ScaleInput name={`it${it.n}`} labels={def.scale} value={answers[it.n]} onChange={(v) => setAnswer(it.n, v)} mode={resolveMode(answerMode, pageIdx, def.scale.length)} />
           {missing.has(it.n) && <p className="field-error" id={`er${it.n}`}>Responde esta pregunta.</p>}
         </fieldset>
       ))}

@@ -4,6 +4,7 @@ import { VALANTI_NORM, VALANTI_NORM_LABEL } from '@sanithelp/scoring';
 import type { ValantiRecord } from '../results/valanti.js';
 import type { Professional } from './expediente.js';
 import { SIGNATURE_BLOCK_H, drawSignatureBlock } from './firma.js';
+import { HEADER_H, brandDocument, defaultStyle, type PdfStyle } from './brand.js';
 
 const INK = rgb(0.1, 0.18, 0.26);
 const MUTED = rgb(0.35, 0.42, 0.47);
@@ -30,7 +31,7 @@ function wrap(font: PDFFont, text: string, size: number, maxW: number): string[]
 const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
 
 /** Informe individual VALANTI para la psicóloga: directo, estándar con la norma nacional, banda e interpretación de cada valor. */
-export async function buildValantiReport(rec: ValantiRecord, professional: Professional, generatedAt: Date): Promise<Uint8Array> {
+export async function buildValantiReport(rec: ValantiRecord, professional: Professional, generatedAt: Date, style: PdfStyle = defaultStyle('valanti')): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -44,12 +45,12 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
     return p;
   };
   let pg = page();
-  let y = H - M;
+  let y = H - M - HEADER_H - 14;
   const text = (t: string, x: number, size = 10, f = font, color = INK) => pg.drawText(safe(t), { x, y, size, font: f, color });
   const ensure = (h: number) => {
     if (y - h < 60) {
       pg = page();
-      y = H - M;
+      y = H - M - HEADER_H - 14;
     }
   };
 
@@ -68,7 +69,7 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
     y -= h + 8;
   }
 
-  text('Participante', M, 11, bold);
+  text('Participante', M, 11, bold, style.accent);
   y -= 15;
   text(`Nombre: ${rec.fullName}`, M);
   text(`Documento: ${rec.document}`, 330);
@@ -78,7 +79,7 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
   y -= 26;
 
   // Tabla de puntajes
-  text('Puntajes por valor', M, 11, bold);
+  text('Puntajes por valor', M, 11, bold, style.accent);
   y -= 16;
   const cols = [M, M + 82, M + 124, M + 166, M + 210, M + 250, M + 292, M + 340, M + 440];
   const heads = ['Valor', 'Parte 1', 'Parte 2', 'Directo', 'Media', 'Desv.', 'Estándar', 'Banda', 'Distancia'];
@@ -103,7 +104,7 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
   y -= 12;
 
   // Barras del puntaje estándar (20 a 80, centro 50)
-  text('Perfil valorativo (puntaje estándar; la línea marca 50 = promedio de la norma)', M, 11, bold);
+  text('Perfil valorativo (puntaje estándar; la línea marca 50 = promedio de la norma)', M, 11, bold, style.accent);
   y -= 20;
   const x0 = 170;
   const barW = 320;
@@ -111,7 +112,7 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
   for (const v of VALANTI_VALUES) {
     text(v, M, 10, bold);
     pg.drawRectangle({ x: x0, y: y - 4, width: barW, height: 14, color: rgb(0.95, 0.96, 0.97) });
-    pg.drawRectangle({ x: x0, y: y - 4, width: toX(r.standard[v]) - x0, height: 14, color: BAR });
+    pg.drawRectangle({ x: x0, y: y - 4, width: toX(r.standard[v]) - x0, height: 14, color: style.accent });
     pg.drawLine({ start: { x: toX(50), y: y - 6 }, end: { x: toX(50), y: y + 12 }, thickness: 1, color: rgb(0.8, 0.1, 0.1) });
     pg.drawText(String(Math.round(r.standard[v])), { x: x0 + barW + 8, y, size: 9, font, color: INK });
     y -= 22;
@@ -120,7 +121,7 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
 
   // Interpretación
   ensure(60);
-  text('Interpretación de los valores', M, 11, bold);
+  text('Interpretación de los valores', M, 11, bold, style.accent);
   y -= 16;
   for (const v of VALANTI_VALUES) {
     const lines = wrap(font, r.interpretation[v], 9, W - 2 * M);
@@ -135,7 +136,7 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
   // Registro de respuestas
   const per = 10;
   ensure(30 + per * 12);
-  text('Registro de respuestas (puntos de la frase A · frase B)', M, 11, bold);
+  text('Registro de respuestas (puntos de la frase A · frase B)', M, 11, bold, style.accent);
   y -= 6;
   const colW = (W - 2 * M) / 3;
   const startY = y;
@@ -149,12 +150,7 @@ export async function buildValantiReport(rec: ValantiRecord, professional: Profe
 
   ensure(SIGNATURE_BLOCK_H + 10);
   await drawSignatureBlock(doc, pg, professional, y, M, font);
-  const pro = [professional.name && `Profesional responsable: ${professional.name}`, professional.document && `Documento: ${professional.document}`, professional.registry && `Registro profesional: ${professional.registry}`].filter(Boolean).join(' · ');
-  const stamp = `Confidencial — uso exclusivo del profesional responsable · Generado el ${pad(generatedAt.getDate())}/${pad(generatedAt.getMonth() + 1)}/${generatedAt.getFullYear()} ${pad(generatedAt.getHours())}:${pad(generatedAt.getMinutes())}`;
-  for (const p of pages) {
-    if (pro) p.drawText(safe(pro), { x: M, y: 30, size: 7, font, color: MUTED });
-    p.drawText(safe(stamp), { x: M, y: 20, size: 7, font, color: MUTED });
-  }
+  await brandDocument(doc, style, professional, generatedAt, { font, bold }, M);
   doc.setTitle('Informe VALANTI');
   doc.setProducer('Sanithelp');
   return doc.save();

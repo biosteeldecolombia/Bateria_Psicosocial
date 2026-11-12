@@ -78,6 +78,13 @@
       "when": 1794436450417,
       "tag": "0010_assistant_role",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794509883890,
+      "tag": "0011_panel_flujo_permisos",
+      "breakpoints": true
     }
   ]
 }

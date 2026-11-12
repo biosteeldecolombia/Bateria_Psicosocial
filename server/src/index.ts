@@ -3,6 +3,7 @@ import { loadConfig } from './config.js';
 import { createDb, runMigrations } from './db/client.js';
 import { bootstrapAdmin } from './scripts/bootstrap.js';
 import { purgeExpiredSessions } from './auth/service.js';
+import { startDigestScheduler } from './workflow/digest.js';
 
 async function main() {
   let cfg;
@@ -22,11 +23,13 @@ async function main() {
   await bootstrapAdmin(cfg, db);
 
   const app = await buildApp(cfg, db);
+  const stopDigest = startDigestScheduler(db, app.appCtx.crypto, app.appCtx.mailer, (m) => app.log.warn(m));
   const timer = setInterval(() => void purgeExpiredSessions(db).catch(() => undefined), 3600_000);
   timer.unref();
 
   const shutdown = async () => {
     clearInterval(timer);
+    stopDigest();
     await app.close();
     await pool.end();
     process.exit(0);

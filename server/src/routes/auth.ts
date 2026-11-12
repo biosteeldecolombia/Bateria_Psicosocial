@@ -1,7 +1,10 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { eq } from 'drizzle-orm';
-import { loginSchema, mfaCodeSchema, preferencesSchema, MFA_ROLES } from '@sanithelp/shared';
-import { campaigns, users, sessions } from '../db/schema.js';
+import { changePasswordSchema, loginSchema, mfaCodeSchema, preferencesSchema, MFA_ROLES } from '@sanithelp/shared';
+import { randomBytes, randomInt } from 'node:crypto';
+import { campaigns, users, sessions, trustedDevices } from '../db/schema.js';
+import { otpEmail } from '../mail/templates.js';
+import { DEFAULT_SECURITY, getSetting, type SecuritySettings } from '../settings.js';
 import {
   LOCK_MINUTES,
   lockoutAfter,
@@ -16,13 +19,17 @@ import {
   newTotp,
   otpQr,
   revokeUserSessions,
+  type SessionRow,
 } from '../auth/service.js';
-import { verifyPassword } from '../security/passwords.js';
+import { hashPassword, validatePasswordPolicy, verifyPassword } from '../security/passwords.js';
 
 const GENERIC_LOGIN_ERROR = 'Usuario o contraseña incorrectos, o cuenta bloqueada temporalmente.';
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
-  const { db, crypto, dummyHash, cookieName, cfg } = app.appCtx;
+  const { db, crypto, dummyHash, cookieName, cfg, mailer } = app.appCtx;
+  const deviceCookie = cfg.NODE_ENV === 'production' ? '__Host-td' : 'td';
+  const OTP_MINUTES = 10;
+  const OTP_MAX_ATTEMPTS = 5;
   const isProd = cfg.NODE_ENV === 'production';
   // En pruebas todas las peticiones salen de la misma IP; el límite real se mantiene en desarrollo y producción.
   const sensitiveLimit = { max: cfg.NODE_ENV === 'test' ? 10_000 : 10, timeWindow: '1 minute' };
@@ -78,7 +85,15 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     await clearFailures(db, user.id);
-    const { token } = await createSession(db, crypto, user); // sesión nueva en cada login (rotación)
+    // Si este equipo ya pasó la verificación en dos pasos hace poco, no se vuelve a pedir.
+    let trusted = false;
+    const deviceToken = req.cookies[deviceCookie];
+    if (deviceToken && MFA_ROLES.includes(user.role) && user.mfaEnabled) {
+      const [d] = await db.select().from(trustedDevices).where(eq(trustedDevices.id, crypto.hashToken(deviceToken))).limit(1);
+      trusted = !!d && d.userId === user.id && d.expiresAt.getTime() > Date.now();
+    }
+    const { token } = await createSession(db, crypto, user, trusted); // sesión nueva en cada login (rotación)
+    if (trusted) await audit(db, user.id, 'auth.mfa_trusted_device', undefined, { ip: req.ip });
     setCookie(reply, token);
     await audit(db, user.id, 'auth.login', undefined, { ip: req.ip });
     const ctx = await loadAuth(db, crypto, token);
@@ -110,6 +125,33 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     await revokeUserSessions(db, req.auth.user.id);
     await audit(db, req.auth.user.id, 'auth.logout_all');
     reply.clearCookie(cookieName, { path: '/' });
+    reply.clearCookie(deviceCookie, { path: '/' });
+    return { ok: true };
+  });
+
+  /**
+   * Cambio de contraseña por la propia persona (administrador, psicóloga, auxiliar, empresa). Pide la contraseña actual,
+   * cierra las demás sesiones y borra la contraseña temporal que el administrador podía ver con la llave.
+   */
+  app.post('/change-password', { config: { rateLimit: sensitiveLimit } }, async (req, reply) => {
+    if (!req.auth) return reply.code(401).send({ error: 'No autenticado' });
+    if (req.auth.status !== 'ready') return reply.code(403).send({ error: 'Completa los pasos de seguridad pendientes', status: req.auth.status });
+    const { user, session } = req.auth;
+    if (user.role === 'collaborator') return reply.code(403).send({ error: 'Sin permiso' });
+    const body = changePasswordSchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
+    if (!(await verifyPassword(user.passwordHash, body.data.currentPassword))) {
+      await audit(db, user.id, 'auth.password_change_failed', undefined, { ip: req.ip });
+      return reply.code(403).send({ error: 'La contraseña actual no es correcta.' });
+    }
+    const username = crypto.decrypt(user.usernameEnc);
+    const policy = validatePasswordPolicy(body.data.newPassword, user.role, [username.split('@')[0] ?? '', crypto.decrypt(user.fullNameEnc)]);
+    if (policy) return reply.code(400).send({ error: policy });
+    if (body.data.newPassword === body.data.currentPassword) return reply.code(400).send({ error: 'La contraseña nueva debe ser distinta de la actual.' });
+    await db.update(users).set({ passwordHash: await hashPassword(body.data.newPassword), initialPasswordEnc: null, passwordChangedAt: new Date() }).where(eq(users.id, user.id));
+    await revokeUserSessions(db, user.id, session.id);
+    await db.delete(trustedDevices).where(eq(trustedDevices.userId, user.id));
+    await audit(db, user.id, 'auth.password_changed', undefined, { ip: req.ip });
     return { ok: true };
   });
 
@@ -124,23 +166,76 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return { secret: totp.secret.base32, otpauthUrl: totp.toString(), qrDataUrl: await otpQr(totp) };
   });
 
+  /** Métodos de verificación disponibles para quien está activando o verificando. */
+  app.get('/mfa/methods', async (req, reply) => {
+    if (!req.auth) return reply.code(401).send({ error: 'No autenticado' });
+    const sec = await getSetting<SecuritySettings>(db, 'security', DEFAULT_SECURITY);
+    return { totp: true, email: mailer.enabled, current: req.auth.user.mfaMethod ?? (req.auth.user.mfaEnabled ? 'totp' : null), trustedDeviceDays: sec.trustedDeviceDays };
+  });
+
+  /** Envía un código de un solo uso al correo de la cuenta (para activar el método «correo» o como alternativa a la aplicación). */
+  app.post('/mfa/email/send', { config: { rateLimit: sensitiveLimit } }, async (req, reply) => {
+    if (!req.auth) return reply.code(401).send({ error: 'No autenticado' });
+    const { user, session } = req.auth;
+    if (!MFA_ROLES.includes(user.role)) return reply.code(403).send({ error: 'Sin permiso' });
+    if (!mailer.enabled) return reply.code(409).send({ error: 'El correo no está configurado. Usa la aplicación de autenticación o pídele al administrador que lo active.' });
+    if (req.auth.status === 'ready' && user.mfaEnabled) return reply.code(409).send({ error: 'Ya verificaste esta sesión.' });
+    // Un reenvío cada 30 s como máximo
+    if (session.otpExpiresAt && session.otpExpiresAt.getTime() - OTP_MINUTES * 60_000 + 30_000 > Date.now()) return reply.code(429).send({ error: 'Espera unos segundos antes de pedir otro código.' });
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    await db.update(sessions).set({ otpHash: crypto.hashToken(`otp:${session.id}:${code}`), otpExpiresAt: new Date(Date.now() + OTP_MINUTES * 60_000), otpAttempts: 0 }).where(eq(sessions.id, session.id));
+    try {
+      await mailer.send(otpEmail({ to: crypto.decrypt(user.usernameEnc), code, minutes: OTP_MINUTES }));
+    } catch (e) {
+      req.log.error({ err: (e as Error).message }, 'No se pudo enviar el código de verificación');
+      return reply.code(502).send({ error: 'No se pudo enviar el correo. Intenta con la aplicación de autenticación.' });
+    }
+    await audit(db, user.id, 'auth.mfa_email_sent', undefined, { ip: req.ip });
+    return { ok: true, minutes: OTP_MINUTES };
+  });
+
+  /** Comprueba el código de correo de esta sesión. Devuelve true si es correcto (y lo consume). */
+  async function checkEmailOtp(session: SessionRow, code: string): Promise<boolean> {
+    if (!session.otpHash || !session.otpExpiresAt || session.otpExpiresAt.getTime() < Date.now() || session.otpAttempts >= OTP_MAX_ATTEMPTS) return false;
+    const ok = session.otpHash === crypto.hashToken(`otp:${session.id}:${code.replace(/\s/g, '')}`);
+    if (ok) await db.update(sessions).set({ otpHash: null, otpExpiresAt: null, otpAttempts: 0 }).where(eq(sessions.id, session.id));
+    else await db.update(sessions).set({ otpAttempts: session.otpAttempts + 1 }).where(eq(sessions.id, session.id));
+    return ok;
+  }
+
+  /** Recuerda este equipo unos días (no vuelve a pedir el segundo paso en él). */
+  async function rememberDevice(reply: FastifyReply, userId: string, label: string) {
+    const sec = await getSetting<SecuritySettings>(db, 'security', DEFAULT_SECURITY);
+    if (sec.trustedDeviceDays <= 0) return;
+    const token = randomBytes(32).toString('base64url');
+    await db.insert(trustedDevices).values({ id: crypto.hashToken(token), userId, label: label.slice(0, 80), expiresAt: new Date(Date.now() + sec.trustedDeviceDays * 86_400_000) });
+    reply.setCookie(deviceCookie, token, { httpOnly: true, secure: isProd, sameSite: 'strict', path: '/', maxAge: sec.trustedDeviceDays * 86_400 });
+  }
+
   app.post('/mfa/enable', { config: { rateLimit: sensitiveLimit } }, async (req, reply) => {
     if (!req.auth) return reply.code(401).send({ error: 'No autenticado' });
     const body = mfaCodeSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const { user, session } = req.auth;
-    if (!MFA_ROLES.includes(user.role) || user.mfaEnabled || !user.mfaSecretEnc) {
+    const method = body.data.method;
+    if (!MFA_ROLES.includes(user.role) || user.mfaEnabled || (method === 'totp' && !user.mfaSecretEnc) || (method === 'email' && !mailer.enabled)) {
       return reply.code(409).send({ error: 'No se puede activar la verificación en este momento.' });
     }
-    const step = checkTotp(crypto.decrypt(user.mfaSecretEnc), crypto.decrypt(user.usernameEnc), body.data.code, user.mfaLastStep);
-    if (step === null) return reply.code(400).send({ error: 'Código incorrecto. Intenta con el código actual de tu aplicación.' });
+    let step: number | null = null;
+    if (method === 'totp') {
+      step = checkTotp(crypto.decrypt(user.mfaSecretEnc!), crypto.decrypt(user.usernameEnc), body.data.code, user.mfaLastStep);
+      if (step === null) return reply.code(400).send({ error: 'Código incorrecto. Intenta con el código actual de tu aplicación.' });
+    } else if (!(await checkEmailOtp(session, body.data.code))) {
+      return reply.code(400).send({ error: 'Código incorrecto o vencido. Pide uno nuevo.' });
+    }
     const codes = generateRecoveryCodes();
     await db
       .update(users)
-      .set({ mfaEnabled: true, mfaLastStep: step, recoveryCodeHashes: codes.map((c) => crypto.hashToken(c)) })
+      .set({ mfaEnabled: true, mfaMethod: method, ...(step !== null ? { mfaLastStep: step } : {}), recoveryCodeHashes: codes.map((c) => crypto.hashToken(c)) })
       .where(eq(users.id, user.id));
     await db.update(sessions).set({ mfaVerified: true }).where(eq(sessions.id, session.id));
-    await audit(db, user.id, 'auth.mfa_enabled');
+    if (body.data.remember) await rememberDevice(reply, user.id, String(req.headers['user-agent'] ?? ''));
+    await audit(db, user.id, 'auth.mfa_enabled', undefined, { method });
     return { recoveryCodes: codes };
   });
 
@@ -149,19 +244,24 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const body = mfaCodeSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const { user, session } = req.auth;
-    if (!user.mfaEnabled || !user.mfaSecretEnc) return reply.code(409).send({ error: 'La verificación en dos pasos no está activa.' });
+    if (!user.mfaEnabled) return reply.code(409).send({ error: 'La verificación en dos pasos no está activa.' });
     if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
       await audit(db, user.id, 'auth.mfa_blocked', undefined, { ip: req.ip });
       return reply.code(429).send({ error: `Demasiados intentos. Espera ${Math.max(1, Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000))} segundos para volver a intentarlo.` });
     }
 
     const code = body.data.code.trim();
-    const step = checkTotp(crypto.decrypt(user.mfaSecretEnc), crypto.decrypt(user.usernameEnc), code, user.mfaLastStep);
     let ok = false;
-    if (step !== null) {
-      await db.update(users).set({ mfaLastStep: step }).where(eq(users.id, user.id));
-      ok = true;
-    } else {
+    // 1) aplicación de autenticación (si la cuenta tiene una), 2) código enviado por correo, 3) código de recuperación
+    if (user.mfaSecretEnc) {
+      const step = checkTotp(crypto.decrypt(user.mfaSecretEnc), crypto.decrypt(user.usernameEnc), code, user.mfaLastStep);
+      if (step !== null) {
+        await db.update(users).set({ mfaLastStep: step }).where(eq(users.id, user.id));
+        ok = true;
+      }
+    }
+    if (!ok && /^\d{6}$/.test(code.replace(/\s/g, '')) && (await checkEmailOtp(session, code))) ok = true;
+    if (!ok) {
       const h = crypto.hashToken(code.toUpperCase());
       if (user.recoveryCodeHashes.includes(h)) {
         await db.update(users).set({ recoveryCodeHashes: user.recoveryCodeHashes.filter((x) => x !== h) }).where(eq(users.id, user.id));
@@ -183,7 +283,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
     await db.update(users).set({ failedAttempts: 0 }).where(eq(users.id, user.id));
     await db.update(sessions).set({ mfaVerified: true }).where(eq(sessions.id, session.id));
-    await audit(db, user.id, 'auth.mfa_verified', undefined, { ip: req.ip });
+    if (body.data.remember) await rememberDevice(reply, user.id, String(req.headers['user-agent'] ?? ''));
+    await audit(db, user.id, 'auth.mfa_verified', undefined, { ip: req.ip, remembered: !!body.data.remember });
     const ctx = await loadAuth(db, crypto, req.cookies[cookieName]);
     return buildMe(ctx!, crypto);
   });

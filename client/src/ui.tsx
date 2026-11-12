@@ -90,26 +90,40 @@ export function Modal({ title, onClose, children, size = 'md', icon, dismissOnOu
   );
 }
 
-export interface Secret { title: string; username: string; password: string; /** Consulta de una credencial ya existente (candado): se puede volver a ver. */ view?: boolean }
+export interface Secret { title: string; username: string; password: string; /** Se puede volver a consultar con la llave. */ view?: boolean }
 
-/** Credenciales entregadas una sola vez, en el centro de la pantalla. No se cierra al pulsar fuera: la contraseña no se vuelve a mostrar. */
-export function SecretModal({ s, onClose }: { s: Secret; onClose: () => void }) {
+/** Botón que copia un texto al portapapeles y avisa «Copiado». */
+export function CopyButton({ text, label = 'Copiar', size = 'md' }: { text: string; label?: string; size?: 'sm' | 'md' }) {
   const [copied, setCopied] = useState(false);
-  const text = `Usuario: ${s.username}\nContraseña: ${s.password}`;
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(t);
+  }, [copied]);
   return (
-    <Modal title={s.title} icon="key" size="sm" onClose={onClose} dismissOnOutside={false}>
-      <p className="muted" style={{ marginTop: 0 }}>Cópiala o anótala ahora: <strong>no se volverá a mostrar</strong>.</p>
-      <dl className="secret">
+    <button type="button" className={`btn secondary${size === 'sm' ? ' sm' : ''}`} onClick={() => navigator.clipboard?.writeText(text).then(() => setCopied(true)).catch(() => undefined)} aria-live="polite">
+      <Icon name={copied ? 'check' : 'copy'} size={size === 'sm' ? 14 : 18} /> {copied ? 'Copiado' : label}
+    </button>
+  );
+}
+
+/** Usuario y contraseña con botones de copia. Se pueden volver a consultar con el icono de la llave. */
+export function SecretModal({ s, onClose }: { s: Secret; onClose: () => void }) {
+  const text = `Usuario: ${s.username}
+Contraseña: ${s.password}`;
+  return (
+    <Modal title={s.title} icon="key" size="sm" onClose={onClose}>
+      <dl className="secret secret-copy">
         <dt>Usuario</dt>
         <dd>{s.username}</dd>
+        <dd className="secret-act"><CopyButton text={s.username} size="sm" /></dd>
         <dt>Contraseña</dt>
         <dd>{s.password}</dd>
+        <dd className="secret-act"><CopyButton text={s.password} size="sm" /></dd>
       </dl>
       <div className="dialog-actions">
-        <button className="btn secondary" onClick={() => navigator.clipboard?.writeText(text).then(() => setCopied(true)).catch(() => undefined)}>
-          <Icon name={copied ? 'check' : 'copy'} /> {copied ? 'Copiado' : 'Copiar'}
-        </button>
-        <button className="btn" onClick={onClose}>Ya la guardé</button>
+        <CopyButton text={text} label="Copiar usuario y contraseña" />
+        <button className="btn" onClick={onClose}>Listo</button>
       </div>
     </Modal>
   );

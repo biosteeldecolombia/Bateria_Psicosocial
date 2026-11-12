@@ -10,6 +10,22 @@ import { buildApp } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { createDb, runMigrations } from '../src/db/client.js';
 import { createAdmin } from '../src/scripts/bootstrap.js';
+import type { Mailer, MailMessage } from '../src/mail/mailer.js';
+
+/** Correo falso para pruebas: guarda lo que se «envía». */
+export function fakeMailer(opts: { failFor?: string[] } = {}): Mailer & { sent: MailMessage[] } {
+  const sent: MailMessage[] = [];
+  return {
+    enabled: true,
+    provider: 'smtp',
+    from: 'evaluaciones@sanithelp.test',
+    sent,
+    async send(m) {
+      if (opts.failFor?.includes(m.to)) throw new Error('fallo simulado');
+      sent.push(m);
+    },
+  };
+}
 
 export interface TestEnv {
   app: FastifyInstance;
@@ -29,7 +45,7 @@ function freePort(): Promise<number> {
   });
 }
 
-export async function startEnv(preferredPort?: number): Promise<TestEnv> {
+export async function startEnv(preferredPort?: number, opts: { mailer?: Mailer } = {}): Promise<TestEnv> {
   const port = preferredPort ?? (await freePort());
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pgtest-'));
   const pg = new EmbeddedPostgres({ databaseDir: dir, user: 'postgres', password: 'test', port, persistent: false, onLog: () => undefined, onError: () => undefined });
@@ -47,7 +63,7 @@ export async function startEnv(preferredPort?: number): Promise<TestEnv> {
   } as NodeJS.ProcessEnv);
   const { db, pool } = createDb(cfg);
   await runMigrations(db);
-  const app = await buildApp(cfg, db);
+  const app = await buildApp(cfg, db, opts);
   await app.ready();
   return {
     app,
@@ -73,6 +89,8 @@ export async function seedAdmin(env: TestEnv) {
 
 export interface Client {
   cookie: string;
+  /** Cookie del dispositivo de confianza (si se recordó este equipo). */
+  device: string;
   csrf: string;
   call: (method: string, url: string, body?: unknown) => Promise<{ status: number; json: any }>;
 }
@@ -80,16 +98,19 @@ export interface Client {
 export function newClient(env: TestEnv): Client {
   const c: Client = {
     cookie: '',
+    device: '',
     csrf: '',
     async call(method, url, body) {
       const res = await env.app.inject({
         method: method as 'GET',
         url,
         payload: body as object | undefined,
-        headers: { origin: 'http://localhost:3000', ...(c.cookie ? { cookie: c.cookie } : {}), ...(c.csrf ? { 'x-csrf-token': c.csrf } : {}) },
+        headers: { origin: 'http://localhost:3000', ...(c.cookie || c.device ? { cookie: [c.cookie, c.device ? `td=${c.device}` : ''].filter(Boolean).join('; ') } : {}), ...(c.csrf ? { 'x-csrf-token': c.csrf } : {}) },
       });
       const set = res.cookies.find((x) => x.name === 'sid');
       if (set) c.cookie = `sid=${set.value}`;
+      const dev = res.cookies.find((x) => x.name === 'td');
+      if (dev) c.device = dev.value;
       const isJson = String(res.headers['content-type'] ?? '').includes('json');
       const json = res.body ? (isJson ? JSON.parse(res.body) : res.body) : null;
       if (json?.csrfToken) c.csrf = json.csrfToken;

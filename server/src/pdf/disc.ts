@@ -3,6 +3,7 @@ import { DISC_GROUPS, DISC_SCALES, decodeDisc, type DiscScale } from '@sanithelp
 import type { DiscRecord } from '../results/disc.js';
 import type { Professional } from './expediente.js';
 import { SIGNATURE_BLOCK_H, drawSignatureBlock } from './firma.js';
+import { HEADER_H, brandDocument, defaultStyle, type PdfStyle } from './brand.js';
 
 const NAMES: Record<DiscScale, string> = { D: 'Dominancia', I: 'Influencia', S: 'Estabilidad', C: 'Cumplimiento' };
 const BAR: Record<DiscScale, [number, number, number]> = { D: [0.78, 0.22, 0.2], I: [0.9, 0.62, 0.1], S: [0.25, 0.62, 0.35], C: [0.25, 0.4, 0.75] };
@@ -40,7 +41,7 @@ const FIELDS: [keyof NonNullable<DiscRecord['result']['pattern']['descripcion']>
 ];
 
 /** Informe individual DISC para la psicóloga: puntajes, segmentos, patrón de perfil con su descripción y registro de respuestas. */
-export async function buildDiscReport(rec: DiscRecord, professional: Professional, generatedAt: Date): Promise<Uint8Array> {
+export async function buildDiscReport(rec: DiscRecord, professional: Professional, generatedAt: Date, style: PdfStyle = defaultStyle('disc')): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -54,12 +55,12 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
     return p;
   };
   let pg = page();
-  let y = H - M;
+  let y = H - M - HEADER_H - 14;
   const text = (t: string, x: number, size = 10, f = font, color = INK) => pg.drawText(safe(t), { x, y, size, font: f, color });
   const ensure = (h: number) => {
     if (y - h < 60) {
       pg = page();
-      y = H - M;
+      y = H - M - HEADER_H - 14;
     }
   };
   const paragraph = (t: string, size = 9.5, f = font, indent = 0) => {
@@ -70,8 +71,6 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
   };
 
   const r = rec.result;
-  text('Informe DISC · Perfil de comportamiento', M, 16, bold);
-  y -= 22;
   text('Documento confidencial para la psicóloga responsable. No constituye un diagnóstico clínico.', M, 8.5, font, MUTED);
   y -= 16;
 
@@ -84,7 +83,7 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
     y -= h + 8;
   }
 
-  text('Participante', M, 11, bold);
+  text('Participante', M, 11, bold, style.accent);
   y -= 15;
   text(`Nombre: ${rec.fullName}`, M);
   text(`Documento: ${rec.document}`, 330);
@@ -94,7 +93,7 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
   y -= 26;
 
   // Puntajes y barras (−28 a +28)
-  text('Perfil (palabras MÁS menos palabras MENOS de cada escala)', M, 11, bold);
+  text('Perfil (palabras MÁS menos palabras MENOS de cada escala)', M, 11, bold, style.accent);
   y -= 22;
   const x0 = 200;
   const barW = 280;
@@ -117,7 +116,7 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
 
   text(`Código de segmentos (D, I, S, C): ${r.code}`, M, 10, bold);
   y -= 16;
-  text(`Patrón de perfil: ${r.pattern.nombre}`, M, 13, bold);
+  text(`Patrón de perfil: ${r.pattern.nombre}`, M, 13, bold, style.accent);
   y -= 20;
   const d = r.pattern.descripcion;
   if (d) {
@@ -131,7 +130,7 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
     if (d.observaciones.length) {
       y -= 6;
       ensure(30);
-      text('Observaciones', M, 11, bold);
+      text('Observaciones', M, 11, bold, style.accent);
       y -= 16;
       for (const o of d.observaciones) paragraph(o, 9, font);
     }
@@ -143,7 +142,7 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
   // Registro de respuestas
   const per = Math.ceil(DISC_GROUPS.length / 2);
   ensure(30 + per * 12);
-  text('Registro de respuestas (MÁS / MENOS)', M, 11, bold);
+  text('Registro de respuestas (MÁS / MENOS)', M, 11, bold, style.accent);
   y -= 6;
   const colW = (W - 2 * M) / 2;
   const startY = y;
@@ -159,12 +158,7 @@ export async function buildDiscReport(rec: DiscRecord, professional: Professiona
 
   ensure(SIGNATURE_BLOCK_H + 10);
   await drawSignatureBlock(doc, pg, professional, y, M, font);
-  const pro = [professional.name && `Profesional responsable: ${professional.name}`, professional.document && `Documento: ${professional.document}`, professional.registry && `Registro profesional: ${professional.registry}`].filter(Boolean).join(' · ');
-  const stamp = `Confidencial — uso exclusivo del profesional responsable · Generado el ${pad(generatedAt.getDate())}/${pad(generatedAt.getMonth() + 1)}/${generatedAt.getFullYear()} ${pad(generatedAt.getHours())}:${pad(generatedAt.getMinutes())}`;
-  for (const p of pages) {
-    if (pro) p.drawText(safe(pro), { x: M, y: 30, size: 7, font, color: MUTED });
-    p.drawText(safe(stamp), { x: M, y: 20, size: 7, font, color: MUTED });
-  }
+  await brandDocument(doc, style, professional, generatedAt, { font, bold }, M);
   doc.setTitle('Informe DISC');
   doc.setProducer('Sanithelp');
   return doc.save();

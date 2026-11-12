@@ -2,9 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { and, eq, lt } from 'drizzle-orm';
 import * as OTPAuth from 'otpauth';
 import QRCode from 'qrcode';
-import { IDLE_MINUTES, MFA_ROLES, DEFAULT_PREFERENCES, type AuthStatus, type MeResponse, type Preferences, type Role } from '@sanithelp/shared';
+import { IDLE_MINUTES, MFA_ROLES, DEFAULT_PREFERENCES, type AuthStatus, type MeResponse, type PermissionKey, type Preferences, type Role } from '@sanithelp/shared';
+import { permissionStore } from './permissions.js';
 import type { Db } from '../db/client.js';
-import { auditLog, campaigns, participants, sessions, users } from '../db/schema.js';
+import { auditLog, campaigns, participants, sessions, trustedDevices, users } from '../db/schema.js';
 import type { Crypto } from '../security/crypto.js';
 
 export type UserRow = typeof users.$inferSelect;
@@ -16,6 +17,8 @@ export interface AuthContext {
   status: AuthStatus;
   campaignName: string | null;
   participant: { id: string; status: 'in_progress' | 'completed' | 'declined' | 'revoked' } | null;
+  /** Permisos efectivos del rol (valores por defecto + cambios del administrador). */
+  permissions: PermissionKey[];
 }
 
 export const ABSOLUTE_SESSION_HOURS = 12;
@@ -91,16 +94,20 @@ export async function loadAuth(db: Db, crypto: Crypto, token: string | undefined
     await db.update(sessions).set({ lastSeenAt: new Date(now) }).where(eq(sessions.id, id));
     session.lastSeenAt = new Date(now);
   }
-  return { user, session, status: computeStatus(user, session), campaignName, participant };
+  const permissions = await permissionStore(db).listFor(user.role);
+  return { user, session, status: computeStatus(user, session), campaignName, participant, permissions };
 }
 
 export async function revokeUserSessions(db: Db, userId: string, exceptId?: string) {
   const all = await db.select({ id: sessions.id }).from(sessions).where(eq(sessions.userId, userId));
   for (const s of all) if (s.id !== exceptId) await db.delete(sessions).where(eq(sessions.id, s.id));
+  // Quitar todas las sesiones también quita la confianza en los equipos recordados (contraseña restablecida, cuenta bloqueada, etc.)
+  if (!exceptId) await db.delete(trustedDevices).where(eq(trustedDevices.userId, userId));
 }
 
 export async function purgeExpiredSessions(db: Db) {
   await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
+  await db.delete(trustedDevices).where(lt(trustedDevices.expiresAt, new Date()));
 }
 
 export function toPreferences(raw: Record<string, unknown>): Preferences {
@@ -108,7 +115,7 @@ export function toPreferences(raw: Record<string, unknown>): Preferences {
 }
 
 export function buildMe(ctx: AuthContext, crypto: Crypto): MeResponse {
-  const { user, session, status, campaignName, participant } = ctx;
+  const { user, session, status, campaignName, participant, permissions } = ctx;
   const idleMs = IDLE_MINUTES[user.role] * 60_000;
   const expires = Math.min(session.expiresAt.getTime(), session.lastSeenAt.getTime() + idleMs);
   return {
@@ -122,6 +129,8 @@ export function buildMe(ctx: AuthContext, crypto: Crypto): MeResponse {
     preferences: toPreferences(user.preferences),
     participant: participant ? { status: participant.status } : null,
     campaignName,
+    permissions,
+    mfaMethod: (user.mfaMethod as 'totp' | 'email' | null) ?? (user.mfaEnabled ? 'totp' : null),
   };
 }
 

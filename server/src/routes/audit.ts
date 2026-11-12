@@ -38,7 +38,7 @@ interface Alert {
  */
 export const auditRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
-  const adminOnly = app.requireReady('admin');
+  const adminOnly = app.requirePerm('audit.view');
 
   const safe = (enc: string | null) => {
     if (!enc) return '';
@@ -231,7 +231,7 @@ export const auditRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Quita la espera de una cuenta bloqueada por intentos fallidos. */
-  app.post('/admin/users/:id/unlock', { preHandler: adminOnly }, async (req, reply) => {
+  app.post('/admin/users/:id/unlock', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!uuidParam(id)) return reply.code(400).send({ error: 'Identificador inválido' });
     const [u] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);

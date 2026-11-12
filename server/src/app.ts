@@ -5,11 +5,12 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Role } from '@sanithelp/shared';
+import type { PermissionKey, Role } from '@sanithelp/shared';
 import type { Config } from './config.js';
 import type { Db } from './db/client.js';
 import { loadAuth, type AuthContext } from './auth/service.js';
 import { createCrypto, type Crypto } from './security/crypto.js';
+import { createMailer, type Mailer } from './mail/mailer.js';
 import { hashPassword } from './security/passwords.js';
 import { authRoutes } from './routes/auth.js';
 import { adminRoutes } from './routes/admin.js';
@@ -22,6 +23,10 @@ import { exportRoutes } from './routes/exports.js';
 import { companyRoutes } from './routes/company.js';
 import { rightsRoutes } from './routes/rights.js';
 import { profileRoutes } from './routes/profile.js';
+import { rolesRoutes } from './routes/roles.js';
+import { mailRoutes } from './routes/mail.js';
+import { workflowRoutes } from './routes/workflow.js';
+import { pdfSettingsRoutes } from './routes/pdfSettings.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -30,6 +35,8 @@ declare module 'fastify' {
   interface FastifyInstance {
     appCtx: AppContext;
     requireReady: (...roles: Role[]) => (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    /** Exige sesión lista y al menos uno de los permisos (configurables por el administrador en Roles y permisos). */
+    requirePerm: (...keys: PermissionKey[]) => (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
 
@@ -39,9 +46,11 @@ export interface AppContext {
   crypto: Crypto;
   dummyHash: string;
   cookieName: string;
+  /** Correo saliente (Outlook). `enabled` es falso si no hay llaves configuradas. */
+  mailer: Mailer;
 }
 
-export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
+export async function buildApp(cfg: Config, db: Db, opts: { mailer?: Mailer } = {}): Promise<FastifyInstance> {
   const crypto = createCrypto(cfg);
   const isProd = cfg.NODE_ENV === 'production';
   const ctx: AppContext = {
@@ -50,6 +59,7 @@ export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
     crypto,
     dummyHash: await hashPassword('hash-de-relleno-para-igualar-tiempos'),
     cookieName: isProd ? '__Host-sid' : 'sid',
+    mailer: opts.mailer ?? createMailer(cfg),
   };
 
   const app = Fastify({
@@ -116,6 +126,12 @@ export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
     if (roles.length && !roles.includes(req.auth.user.role)) return reply.code(403).send({ error: 'Sin permiso' });
   });
 
+  app.decorate('requirePerm', (...keys: PermissionKey[]) => async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!req.auth) return reply.code(401).send({ error: 'No autenticado' });
+    if (req.auth.status !== 'ready') return reply.code(403).send({ error: 'Completa los pasos de seguridad pendientes', status: req.auth.status });
+    if (req.auth.user.role === 'collaborator' || !keys.some((k) => req.auth!.permissions.includes(k))) return reply.code(403).send({ error: 'Sin permiso' });
+  });
+
   app.get('/api/health', { config: { rateLimit: false } }, async () => ({ status: 'ok' }));
   await app.register(authRoutes, { prefix: '/api/auth' });
   await app.register(adminRoutes, { prefix: '/api' });
@@ -128,6 +144,10 @@ export async function buildApp(cfg: Config, db: Db): Promise<FastifyInstance> {
   await app.register(companyRoutes, { prefix: '/api' });
   await app.register(rightsRoutes, { prefix: '/api' });
   await app.register(profileRoutes, { prefix: '/api' });
+  await app.register(rolesRoutes, { prefix: '/api' });
+  await app.register(mailRoutes, { prefix: '/api' });
+  await app.register(workflowRoutes, { prefix: '/api' });
+  await app.register(pdfSettingsRoutes, { prefix: '/api' });
 
   // Cliente (SPA) servido desde el mismo dominio.
   const dist = path.resolve(process.cwd(), cfg.CLIENT_DIST);

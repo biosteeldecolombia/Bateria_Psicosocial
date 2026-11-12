@@ -7,6 +7,8 @@ import { assistantCampaigns, campaigns, companies, consents, exportJobs, fichaAn
 import { allowedCompanyIds as allowedIds, assistantScope, manageableCampaign } from '../auth/access.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
 import { generateTempPassword, hashPassword, verifyPassword } from '../security/passwords.js';
+import { setStage } from '../workflow/service.js';
+import { workflowEvents } from '../db/schema.js';
 
 const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
 
@@ -17,8 +19,12 @@ const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-
 export const campaignRoutes: FastifyPluginAsync = async (app) => {
   const { db, crypto } = app.appCtx;
   // El auxiliar administrativo tiene en campañas lo mismo que la psicóloga (acotado a lo que se le asignó: ver `manageableCampaign`).
-  const staff = app.requireReady('admin', 'psychologist', 'assistant');
+  const staff = app.requirePerm('campaigns.view');
   const staffOrAssistant = staff;
+  const pCreate = app.requirePerm('campaigns.create');
+  const pEdit = app.requirePerm('campaigns.edit');
+  const pDelete = app.requirePerm('campaigns.delete');
+  const pCred = app.requirePerm('campaigns.credentials');
 
   const allowedCompanyIds = (userId: string, role: string) => allowedIds(db, userId, role);
 
@@ -67,7 +73,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     return out;
   });
 
-  app.post('/campaigns', { preHandler: staff }, async (req, reply) => {
+  app.post('/campaigns', { preHandler: pCreate }, async (req, reply) => {
     const body = createCampaignSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const actor = req.auth!.user;
@@ -101,13 +107,14 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       campaignId: campaign!.id,
       passwordHash: await hashPassword(password),
     });
+    await db.insert(workflowEvents).values({ campaignId: campaign!.id, stage: 'created', actorId: actor.id });
     await audit(db, actor.id, 'campaign.created', { type: 'campaign', id: campaign!.id }, { assessments: campaign!.assessments });
     // La contraseña se muestra una sola vez.
     return reply.code(201).send({ id: campaign!.id, username, password });
   });
 
   /** Nueva contraseña para la credencial de la campaña (p. ej. si se filtró). No afecta lo ya respondido. */
-  app.post('/campaigns/:id/regenerate-access', { preHandler: staff }, async (req, reply) => {
+  app.post('/campaigns/:id/regenerate-access', { preHandler: pCred }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const actor = req.auth!.user;
     const c = uuidParam(id) ? await manageable(id, actor.id, actor.role) : null;
@@ -122,7 +129,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Candado: usuario y contraseña de la campaña. Solo admin o la psicóloga asignada a la empresa (lo decide `manageable`). */
-  app.get('/campaigns/:id/access', { preHandler: staff }, async (req, reply) => {
+  app.get('/campaigns/:id/access', { preHandler: pCred }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const actor = req.auth!.user;
     const c = uuidParam(id) ? await manageable(id, actor.id, actor.role) : null;
@@ -134,7 +141,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Abrir o cerrar la campaña. Al cerrar, la credencial deja de funcionar y se cierran las sesiones abiertas. */
-  app.post('/campaigns/:id/status', { preHandler: staff }, async (req, reply) => {
+  app.post('/campaigns/:id/status', { preHandler: pEdit }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = campaignStatusSchema.safeParse(req.body);
     const actor = req.auth!.user;
@@ -143,12 +150,15 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     await db.update(campaigns).set({ status: body.data.status, closedAt: body.data.status === 'closed' ? new Date() : null }).where(eq(campaigns.id, c.id));
     const u = await accessUserOf(c.id);
     if (u && body.data.status === 'closed') await revokeUserSessions(db, u.id);
+    // Flujo de trabajo: cerrar = «Respuestas finalizadas»; reabrir antes de la evaluación vuelve a «En curso»
+    if (body.data.status === 'closed' && (c.stage === 'created' || c.stage === 'in_progress')) await setStage(db, c.id, 'finished', actor.id, 'Campaña cerrada');
+    if (body.data.status === 'open' && c.stage === 'finished') await setStage(db, c.id, 'in_progress', actor.id, 'Campaña reabierta');
     await audit(db, actor.id, body.data.status === 'closed' ? 'campaign.closed' : 'campaign.reopened', { type: 'campaign', id: c.id });
     return { ok: true };
   });
 
   /** Renombra la campaña. */
-  app.patch('/campaigns/:id', { preHandler: staff }, async (req, reply) => {
+  app.patch('/campaigns/:id', { preHandler: pEdit }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = updateCampaignSchema.safeParse(req.body);
     const actor = req.auth!.user;
@@ -190,7 +200,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
    * Con participantes: solo el administrador, con la campaña cerrada y escribiendo el nombre exacto;
    * borra respuestas, fichas y constancias de consentimiento de forma definitiva (queda la auditoría).
    */
-  app.delete('/campaigns/:id', { preHandler: staff }, async (req, reply) => {
+  app.delete('/campaigns/:id', { preHandler: pDelete }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const actor = req.auth!.user;
     const c = uuidParam(id) ? await manageable(id, actor.id, actor.role) : null;

@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import type { PermissionDef } from '@sanithelp/shared';
 import { api } from './api';
 import { Icon } from './icons';
 import { EmptyState, Modal, RowMenu, SelectAll, StatusBadge, useAction } from './ui';
@@ -17,6 +18,9 @@ export interface UserRow {
   active: boolean;
   mfaRequired: boolean;
   mfaEnabled: boolean;
+  mfaMethod?: 'totp' | 'email' | null;
+  /** Hay una contraseña temporal consultable con la llave (la persona aún no la cambió). */
+  hasTempPassword?: boolean;
   locked: boolean;
   createdAt: string;
   lastLoginAt: string | null;
@@ -26,30 +30,6 @@ export interface UserRow {
 }
 
 export const ROLE_LABEL: Record<UserRow['role'], string> = { admin: 'Administrador', psychologist: 'Psicóloga', assistant: 'Auxiliar administrativo', company: 'Empresa cliente' };
-
-/** Permisos de cada rol, tal como los aplica el servidor. */
-const PERMISSIONS: Record<UserRow['role'], string[]> = {
-  admin: [
-    'Crear y administrar empresas y cuentas de personas',
-    'Ver todas las empresas, campañas y resultados',
-    'Restablecer contraseñas, activar o desactivar cuentas',
-    'Consultar el registro de auditoría',
-    'Exportar expedientes y gestionar derechos de titulares',
-  ],
-  psychologist: [
-    'Crear campañas y credenciales solo en sus empresas asignadas',
-    'Ver resultados y exportar expedientes de sus empresas',
-    'Gestionar derechos de titulares de sus empresas',
-    'Editar su perfil profesional (documento y registro)',
-  ],
-  assistant: [
-    'Ver el listado de personas de las empresas o campañas que se le asignaron',
-    'Descargar expedientes y todos los informes en PDF de esas empresas o campañas (indicando el motivo)',
-    'Sin acceso a resultados en pantalla ni a gestionar personas, campañas o cuentas',
-    'Verificación en dos pasos obligatoria; todo queda en la auditoría',
-  ],
-  company: ['Ver únicamente los reportes agregados de su empresa', 'Sin acceso a respuestas individuales ni a la gestión de campañas'],
-};
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' }) : 'Nunca');
 const nameOf = (u: UserRow) => u.fullName || u.username;
@@ -105,11 +85,20 @@ function CampaignPicker({ campaigns, value, onChange }: { campaigns: CampaignLit
   );
 }
 
+/** Permisos vigentes del rol, leídos de la configuración actual (Usuarios → Roles y permisos). */
 function PermissionList({ role }: { role: UserRow['role'] }) {
+  const [info, setInfo] = useState<{ permissions: PermissionDef[]; matrix: Record<string, Record<string, boolean>> } | null>(null);
+  useEffect(() => { api('GET', '/api/admin/roles').then(setInfo).catch(() => undefined); }, []);
+  if (!info) return null;
+  const granted = role === 'admin' ? info.permissions : info.permissions.filter((p) => info.matrix[role]?.[p.key]);
   return (
-    <ul className="perm-list" aria-label={`Permisos del rol ${ROLE_LABEL[role]}`}>
-      {PERMISSIONS[role].map((p) => <li key={p}><Icon name="check" size={16} /> {p}</li>)}
-    </ul>
+    <>
+      <ul className="perm-list" aria-label={`Permisos del rol ${ROLE_LABEL[role]}`}>
+        {granted.map((p) => <li key={p.key}><Icon name="check" size={16} /> {p.label}</li>)}
+        {granted.length === 0 && <li className="muted">Sin permisos concedidos.</li>}
+      </ul>
+      <p className="muted"><small>Se cambian en «Roles y permisos». Todas las cuentas de personal exigen verificación en dos pasos, salvo la empresa cliente.</small></p>
+    </>
   );
 }
 
@@ -228,7 +217,7 @@ function PasswordForm({ user, onSecret, onClose }: { user: UserRow; onSecret: (t
         <label htmlFor="pw-new">Nueva contraseña</label>
         <input id="pw-new" type={show ? 'text' : 'password'} autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
         <label className="check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Mostrar contraseña</label>
-        <p className="muted">Mínimo 12 caracteres, sin palabras comunes ni el nombre o correo de la persona. Se cerrarán sus sesiones.</p>
+        <p className="muted">Mínimo 12 caracteres, sin palabras comunes ni el nombre o correo de la persona. Se cerrarán sus sesiones. La persona podrá cambiarla por una propia en «Mi cuenta».</p>
         <div className="dialog-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
           <button className="btn" disabled={act.busy || pwd.length < 12}><Icon name="check" /> Guardar contraseña</button>
@@ -254,6 +243,11 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
   const [statusFilter, setStatusFilter] = useState('');
   const [edit, setEdit] = useState<UserRow | null>(null);
   const [pwdUser, setPwdUser] = useState<UserRow | null>(null);
+  const viewKey = (u: UserRow) => void act.run(async () => {
+    const r = await api<{ username: string; password: string | null; changedByUser: boolean }>('GET', `/api/admin/users/${u.id}/credential`);
+    if (r.password === null) window.alert(r.changedByUser ? `${nameOf(u)} ya cambió su contraseña por una propia: por seguridad nadie más puede verla. Si la olvidó, usa «Generar contraseña nueva».` : 'Esta cuenta no tiene una contraseña temporal guardada. Usa «Generar contraseña nueva».');
+    else onSecret(`Acceso de ${nameOf(u)}`, r.username, r.password);
+  });
 
   const term = q.trim().toLowerCase();
   const shown = rows.filter(
@@ -309,9 +303,11 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
                     <StatusBadge on={u.active} onText="Activa" offText="Desactivada" />
                     {u.locked && <span className="badge warn"><Icon name="lock" size={12} /> Bloqueada</span>}
                     {u.mfaRequired && !u.mfaEnabled && <span className="badge warn"><Icon name="shield" size={12} /> MFA pendiente</span>}
+                    {u.mfaEnabled && <span className="chip" title="Método de verificación en dos pasos">{u.mfaMethod === 'email' ? 'MFA por correo' : 'MFA app'}</span>}
                   </td>
                   <td>{fmt(u.lastLoginAt)}</td>
                   <td className="actions">
+                    <button className="icon-btn" title={u.hasTempPassword ? 'Ver usuario y contraseña temporal (llave)' : 'La persona ya cambió su contraseña'} aria-label={`Ver usuario y contraseña de ${nameOf(u)}`} disabled={!u.hasTempPassword} onClick={() => viewKey(u)}><Icon name="key" /></button>
                     <button className="btn secondary sm" onClick={() => setEdit(u)}><Icon name="edit" /> Editar</button>
                     <RowMenu
                       label={`Más acciones para ${nameOf(u)}`}

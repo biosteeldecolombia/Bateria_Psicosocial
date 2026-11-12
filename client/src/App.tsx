@@ -9,6 +9,7 @@ import { Participation } from './Participation';
 import { CompanyHome } from './analysis/CompanyHome';
 import { Icon } from './icons';
 import { Backdrop, LogoFull, PRODUCT_NAME, Splash } from './BrandLoader';
+import { CopyButton } from './ui';
 
 const ROLE_LABEL: Record<string, string> = { admin: 'Administrador', psychologist: 'Psicóloga', assistant: 'Auxiliar administrativo', collaborator: 'Colaborador', company: 'Empresa cliente' };
 
@@ -105,59 +106,113 @@ function Login({ onMe }: { onMe: (m: MeResponse) => void }) {
   );
 }
 
+interface MfaMethods { totp: boolean; email: boolean; current: 'totp' | 'email' | null; trustedDeviceDays: number }
+
+function useMfaMethods() {
+  const [m, setM] = useState<MfaMethods | null>(null);
+  useEffect(() => { api<MfaMethods>('GET', '/api/auth/mfa/methods').then(setM).catch(() => setM({ totp: true, email: false, current: null, trustedDeviceDays: 0 })); }, []);
+  return m;
+}
+
+/** Casilla para no volver a pedir el segundo paso en este equipo durante unos días. */
+function RememberDevice({ days, value, onChange }: { days: number; value: boolean; onChange: (v: boolean) => void }) {
+  if (days <= 0) return null;
+  return <label className="check"><input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} /> Confiar en este equipo durante {days} {days === 1 ? 'día' : 'días'} (no pedir el código otra vez)</label>;
+}
+
 function MfaSetup({ onMe }: { onMe: () => void }) {
+  const methods = useMfaMethods();
+  const [method, setMethod] = useState<'totp' | 'email'>('email');
   const [setup, setSetup] = useState<{ secret: string; qrDataUrl: string } | null>(null);
   const [codes, setCodes] = useState<string[] | null>(null);
   const [code, setCode] = useState('');
+  const [sent, setSent] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [loadErr, setLoadErr] = useState('');
+  // Si el correo está disponible es la opción por defecto (más cómoda); si no, la aplicación.
+  useEffect(() => { if (methods && !methods.email) setMethod('totp'); }, [methods]);
   useEffect(() => {
-    api('POST', '/api/auth/mfa/setup').then(setSetup).catch((e) => setLoadErr(e.message));
-  }, []);
-  const { error, busy, submit } = useSubmit(async () => setCodes((await api('POST', '/api/auth/mfa/enable', { code })).recoveryCodes));
+    if (method === 'totp' && !setup) api('POST', '/api/auth/mfa/setup').then(setSetup).catch((e) => setLoadErr(e.message));
+  }, [method, setup]);
+  const sendCode = useSubmit(async () => { await api('POST', '/api/auth/mfa/email/send'); setSent(true); });
+  const enable = useSubmit(async () => setCodes((await api('POST', '/api/auth/mfa/enable', { code, method, remember })).recoveryCodes));
 
   if (codes) {
     return (
       <section className="card narrow" aria-labelledby="t">
         <h1 id="t">Guarda tus códigos de recuperación</h1>
-        <p>Si pierdes tu teléfono podrás entrar con uno de estos códigos (cada uno sirve una sola vez). <strong>No se volverán a mostrar.</strong></p>
+        <p>Si pierdes acceso a tu correo o a tu teléfono podrás entrar con uno de estos códigos (cada uno sirve una sola vez).</p>
         <ul className="codes">{codes.map((c) => <li key={c}>{c}</li>)}</ul>
+        <p><CopyButton text={codes.join('\n')} label="Copiar los códigos" /></p>
         <button className="btn block" onClick={onMe}>Ya los guardé, continuar</button>
       </section>
     );
   }
+  if (!methods) return <section className="card narrow"><Splash /></section>;
   return (
     <section className="card narrow" aria-labelledby="t">
       <h1 id="t">Activa la verificación en dos pasos</h1>
-      <p className="muted">Es obligatoria para tu rol. Escanea el código con una aplicación de autenticación (Google Authenticator, Microsoft Authenticator, Authy…).</p>
+      <p className="muted">Es obligatoria para tu rol. Elige cómo prefieres recibir el código:</p>
+      {methods.email && (
+        <div className="seg" role="group" aria-label="Método de verificación">
+          <label><input type="radio" name="mfam" checked={method === 'email'} onChange={() => setMethod('email')} /><span>Código por correo</span></label>
+          <label><input type="radio" name="mfam" checked={method === 'totp'} onChange={() => setMethod('totp')} /><span>Aplicación de autenticación</span></label>
+        </div>
+      )}
       <ErrorBox msg={loadErr} />
-      {setup && (
-        <>
-          <img className="qr" src={setup.qrDataUrl} alt="Código QR para la aplicación de autenticación" width="220" height="220" />
-          <p className="hint">¿No puedes escanear? Escribe esta clave en la aplicación: <code>{setup.secret}</code></p>
-          <form onSubmit={submit} noValidate>
-            <ErrorBox msg={error} />
-            <label htmlFor="m">Código de 6 dígitos</label>
-            <input id="m" type="text" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
-            <button className="btn block" disabled={busy || code.length < 6}>Activar</button>
-          </form>
-        </>
+      {method === 'email' ? (
+        <form onSubmit={enable.submit} noValidate>
+          <p className="muted">Te enviamos un código de 6 dígitos a tu correo cada vez que ingreses desde un equipo nuevo. Sin instalar nada.</p>
+          <ErrorBox msg={sendCode.error || enable.error} />
+          <button type="button" className="btn secondary block" disabled={sendCode.busy} onClick={(e) => void sendCode.submit(e as unknown as FormEvent)}>{sent ? 'Reenviar código' : 'Enviarme el código'}</button>
+          {sent && <div className="alert ok" role="status">Revisa tu correo (y el spam). El código vence en 10 minutos.</div>}
+          <label htmlFor="m">Código de 6 dígitos</label>
+          <input id="m" type="text" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
+          <RememberDevice days={methods.trustedDeviceDays} value={remember} onChange={setRemember} />
+          <button className="btn block" disabled={enable.busy || code.length < 6}>Activar</button>
+        </form>
+      ) : (
+        setup && (
+          <>
+            <p className="muted">Escanea el código con una aplicación de autenticación (Google Authenticator, Microsoft Authenticator, Authy…).</p>
+            <img className="qr" src={setup.qrDataUrl} alt="Código QR para la aplicación de autenticación" width="220" height="220" />
+            <p className="hint">¿No puedes escanear? Escribe esta clave en la aplicación: <code>{setup.secret}</code></p>
+            <form onSubmit={enable.submit} noValidate>
+              <ErrorBox msg={enable.error} />
+              <label htmlFor="m">Código de 6 dígitos</label>
+              <input id="m" type="text" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
+              <RememberDevice days={methods.trustedDeviceDays} value={remember} onChange={setRemember} />
+              <button className="btn block" disabled={enable.busy || code.length < 6}>Activar</button>
+            </form>
+          </>
+        )
       )}
     </section>
   );
 }
 
 function MfaVerify({ onMe }: { onMe: (m: MeResponse) => void }) {
+  const methods = useMfaMethods();
   const [code, setCode] = useState('');
-  const { error, busy, submit } = useSubmit(async () => onMe(await api('POST', '/api/auth/mfa/verify', { code })));
+  const [sent, setSent] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const verify = useSubmit(async () => onMe(await api('POST', '/api/auth/mfa/verify', { code, remember })));
+  const send = useSubmit(async () => { await api('POST', '/api/auth/mfa/email/send'); setSent(true); });
+  const emailOnly = methods?.current === 'email';
   return (
     <section className="card narrow" aria-labelledby="t">
       <h1 id="t">Verificación en dos pasos</h1>
-      <p className="muted">Escribe el código de tu aplicación de autenticación, o un código de recuperación.</p>
-      <form onSubmit={submit} noValidate>
-        <ErrorBox msg={error} />
+      <p className="muted">{emailOnly ? 'Te enviaremos un código a tu correo.' : 'Escribe el código de tu aplicación de autenticación'}{methods?.email && !emailOnly ? ', o pide que te lo enviemos por correo' : ''}. También sirve un código de recuperación.</p>
+      <form onSubmit={verify.submit} noValidate>
+        <ErrorBox msg={verify.error || send.error} />
+        {methods?.email && (
+          <button type="button" className={emailOnly && !sent ? 'btn block' : 'btn secondary block'} disabled={send.busy} onClick={(e) => void send.submit(e as unknown as FormEvent)}>{sent ? 'Reenviar código por correo' : 'Enviarme un código por correo'}</button>
+        )}
+        {sent && <div className="alert ok" role="status">Te enviamos un código. Revisa tu correo (y el spam); vence en 10 minutos.</div>}
         <label htmlFor="m">Código</label>
         <input id="m" type="text" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
-        <button className="btn block" disabled={busy || code.length < 6}>Verificar</button>
+        {methods && <RememberDevice days={methods.trustedDeviceDays} value={remember} onChange={setRemember} />}
+        <button className="btn block" disabled={verify.busy || code.length < 6}>Verificar</button>
       </form>
     </section>
   );
