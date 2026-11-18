@@ -57,13 +57,25 @@ export function createMailer(cfg: Config): Mailer {
       secure: cfg.SMTP_PORT === 465,
       requireTLS: cfg.SMTP_PORT !== 465,
       auth: { user: cfg.SMTP_USER!, pass: cfg.SMTP_PASSWORD! },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     });
     return {
       enabled: true,
       provider: 'smtp',
       from: cfg.MAIL_FROM!,
       async send(m) {
-        await transport.sendMail({ from: { name: cfg.MAIL_FROM_NAME, address: cfg.MAIL_FROM! }, to: m.to, subject: m.subject, text: m.text, html: m.html });
+        try {
+          await transport.sendMail({ from: { name: cfg.MAIL_FROM_NAME, address: cfg.MAIL_FROM! }, to: m.to, subject: m.subject, text: m.text, html: m.html });
+        } catch (e) {
+          const err = e as { code?: string; responseCode?: number; message: string };
+          if (err.code === 'ETIMEDOUT' || err.code === 'ECONNECTION' || err.code === 'ESOCKET')
+            throw new Error('No se pudo conectar al servidor SMTP (tiempo agotado). Es probable que el hosting bloquee el puerto 587; usa Microsoft Graph (docs/CORREO_OUTLOOK.md, opción A).');
+          if (err.responseCode === 535 || err.code === 'EAUTH')
+            throw new Error('Outlook rechazó el usuario o la contraseña de aplicación. Revisa que «SMTP autenticado» esté activo en el buzón.');
+          throw new Error(`No se pudo enviar por SMTP: ${err.message}`);
+        }
       },
     };
   }
