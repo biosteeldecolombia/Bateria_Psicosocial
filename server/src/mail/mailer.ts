@@ -11,7 +11,7 @@ export interface MailMessage {
 export interface Mailer {
   /** Falso cuando no hay correo configurado: las funciones que dependen de él se ocultan o avisan. */
   enabled: boolean;
-  provider: 'none' | 'graph' | 'smtp';
+  provider: 'none' | 'graph' | 'smtp' | 'brevo';
   from: string | null;
   send(msg: MailMessage): Promise<void>;
 }
@@ -47,6 +47,28 @@ export function createMailer(cfg: Config): Mailer {
           body: JSON.stringify({ message: { subject: m.subject, body: { contentType: 'HTML', content: m.html }, toRecipients: [{ emailAddress: { address: m.to } }] }, saveToSentItems: true }),
         });
         if (!res.ok) throw new Error(`Microsoft Graph respondió ${res.status} al enviar. Revisa el permiso Mail.Send y el buzón remitente.`);
+      },
+    };
+  }
+  if (cfg.MAIL_PROVIDER === 'brevo') {
+    return {
+      enabled: true,
+      provider: 'brevo',
+      from: cfg.MAIL_FROM!,
+      async send(m) {
+        let res: Response;
+        try {
+          res = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: { 'api-key': cfg.BREVO_API_KEY!, 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({ sender: { name: cfg.MAIL_FROM_NAME, email: cfg.MAIL_FROM! }, to: [{ email: m.to }], subject: m.subject, htmlContent: m.html, textContent: m.text }),
+            signal: AbortSignal.timeout(15_000),
+          });
+        } catch {
+          throw new Error('No se pudo conectar con Brevo (tiempo agotado).');
+        }
+        if (res.status === 401) throw new Error('Brevo rechazó la llave de API. Revisa BREVO_API_KEY.');
+        if (!res.ok) throw new Error(`Brevo respondió ${res.status}. Revisa que el remitente ${cfg.MAIL_FROM} esté verificado en Brevo (Remitentes y dominios).`);
       },
     };
   }

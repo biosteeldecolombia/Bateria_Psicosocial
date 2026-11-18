@@ -80,7 +80,7 @@ export function SettingsPanel() {
         <h2 id="st-mail" className="panel-title"><Icon name="key" size={20} /> Correo (Outlook)</h2>
         {s.mail.enabled ? (
           <>
-            <p><span className="badge on"><Icon name="dot" size={12} /> Conectado</span> Los correos salen desde <strong>{s.mail.from}</strong> ({s.mail.provider === 'graph' ? 'Microsoft Graph' : 'SMTP'}).</p>
+            <p><span className="badge on"><Icon name="dot" size={12} /> Conectado</span> Los correos salen desde <strong>{s.mail.from}</strong> ({s.mail.provider === 'graph' ? 'Microsoft Graph' : s.mail.provider === 'brevo' ? 'Brevo' : 'SMTP'}).</p>
             <label htmlFor="st-to">Enviar un correo de prueba a</label>
             <input id="st-to" type="email" value={to} onChange={(e) => setTo(e.target.value)} />
             <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>

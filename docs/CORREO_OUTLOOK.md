@@ -49,6 +49,21 @@ SMTP_PASSWORD=...
 
 ---
 
+## Opción C: Brevo (API por HTTPS; sin administrador de Microsoft)
+
+Sirve cuando el hosting (Railway) bloquea SMTP y no se puede registrar una app en Microsoft. Las credenciales y códigos pasan por Brevo (servicio de correo transaccional): valídalo con la política de datos de la empresa.
+
+1. Crear cuenta en https://www.brevo.com (plan gratis: ~300 correos/día).
+2. *Remitentes, dominios e IP* → *Remitentes* → agregar `resultados@sanithelp.com`; llega un enlace de verificación a ese buzón. (Opcional, mejora la entrega: autenticar el dominio con los registros DNS que indica Brevo.)
+3. *SMTP y API* → *Claves de API* → crear una y copiarla.
+
+```
+MAIL_PROVIDER=brevo
+MAIL_FROM=resultados@sanithelp.com
+MAIL_FROM_NAME=Sanithelp
+BREVO_API_KEY=...
+```
+
 ## Cómo probar
 
 1. Reiniciar el servicio con las variables cargadas.

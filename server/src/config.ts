@@ -23,13 +23,15 @@ const schema = z.object({
   CLIENT_DIST: z.string().default('../client/dist'),
   // ----- Correo saliente (Outlook / Microsoft 365). Ver docs/CORREO_OUTLOOK.md -----
   /** 'graph' (recomendado: Microsoft Graph, app registrada en Entra ID), 'smtp' (SMTP AUTH de Outlook) o 'none'. */
-  MAIL_PROVIDER: z.enum(['none', 'graph', 'smtp']).default('none'),
+  MAIL_PROVIDER: z.enum(['none', 'graph', 'smtp', 'brevo']).default('none'),
   /** Buzón desde el que salen los correos (p. ej. evaluaciones@sanithelp.com). */
   MAIL_FROM: z.string().email().optional(),
   MAIL_FROM_NAME: z.string().default('Sanithelp'),
   MS_TENANT_ID: z.string().optional(),
   MS_CLIENT_ID: z.string().optional(),
   MS_CLIENT_SECRET: z.string().optional(),
+  /** Solo con MAIL_PROVIDER=brevo: llave de API (Brevo → SMTP y API → Claves de API). Va por HTTPS, así que el hosting no la bloquea. */
+  BREVO_API_KEY: z.string().optional(),
   SMTP_HOST: z.string().default('smtp.office365.com'),
   SMTP_PORT: z.coerce.number().int().default(587),
   SMTP_USER: z.string().optional(),
@@ -51,6 +53,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   if (c.MAIL_PROVIDER !== 'none' && !c.MAIL_FROM) throw new Error('MAIL_FROM es obligatorio cuando MAIL_PROVIDER no es "none".');
   if (c.MAIL_PROVIDER === 'graph' && !(c.MS_TENANT_ID && c.MS_CLIENT_ID && c.MS_CLIENT_SECRET)) throw new Error('MAIL_PROVIDER=graph exige MS_TENANT_ID, MS_CLIENT_ID y MS_CLIENT_SECRET.');
+  if (c.MAIL_PROVIDER === 'brevo' && !c.BREVO_API_KEY) throw new Error('MAIL_PROVIDER=brevo exige BREVO_API_KEY.');
   if (c.MAIL_PROVIDER === 'smtp' && !(c.SMTP_USER && c.SMTP_PASSWORD)) throw new Error('MAIL_PROVIDER=smtp exige SMTP_USER y SMTP_PASSWORD.');
   return c;
 }
