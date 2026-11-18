@@ -48,8 +48,14 @@ export function campaignAccessEmail(o: { to: string; companyName: string; campai
 /** Código personal para retomar el cuestionario (las personas suelen no guardarlo). */
 export function resumeCodeEmail(o: { to: string; campaignName: string; code: string; url: string }): MailMessage {
   const subject = 'Tu código para continuar tus evaluaciones';
-  const text = `Hola,\n\nTu código personal para continuar tu cuestionario (${o.campaignName}) es: ${o.code}\n\nIngresa a ${o.url} con la credencial de tu empresa, elige «Retomar» y escribe tu documento y este código.\n\nSanithelp S.A.S.`;
-  const html = layout('Tu código para continuar', `<p style="margin:0 0 8px">Si te interrumpes, podrás retomar tu cuestionario (<strong>${esc(o.campaignName)}</strong>) con este código:</p>${box([['Código personal', o.code]])}<p style="margin:0;color:#5a7083;font-size:14px">Ingresa con la credencial de tu empresa, elige <strong>Retomar</strong> y escribe tu documento y este código.</p>`);
+  const text = `Hola,\n\nTu código personal para continuar tu cuestionario (${o.campaignName}) es: ${o.code}\n\nAbre ${o.url} , ingresa con la credencial de tu empresa, elige «Retomar mi avance» y escribe tu documento y este código.\n\nSanithelp S.A.S.`;
+  const html = layout(
+    'Tu código para continuar',
+    `<p style="margin:0 0 8px">Si te interrumpes, podrás retomar tu cuestionario (<strong>${esc(o.campaignName)}</strong>) con este código:</p>${box([['Código personal', o.code]])}
+<p style="margin:16px 0"><a href="${esc(o.url)}" style="background:#0b5c7a;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:999px;font-weight:700;display:inline-block">Abrir la plataforma y retomar</a></p>
+<p style="margin:0 0 12px;color:#5a7083;font-size:14px">Ingresa con la credencial de tu empresa, elige <strong>Retomar mi avance</strong> y escribe tu documento y este código.</p>
+<img src="${esc(o.url.replace(/\/$/, ''))}/brand/instructivo_retomar.png" alt="Cómo retomar tu avance: 1. Ingresa con la credencial de tu empresa. 2. Elige Retomar mi avance. 3. Escribe tu documento y tu código personal." width="500" style="display:block;max-width:100%;height:auto;border-radius:10px;border:1px solid #d3e3ec">`,
+  );
   return { to: o.to, subject, text, html };
 }
 
