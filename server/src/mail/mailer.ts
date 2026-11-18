@@ -19,7 +19,8 @@ export interface Mailer {
 /** Token de aplicación de Microsoft Graph (flujo «client credentials»), con caché hasta poco antes de vencer. */
 function graphTokenProvider(cfg: Config) {
   let cached: { token: string; exp: number } | null = null;
-  return async () => {
+  return async (fresh = false) => {
+    if (fresh) cached = null;
     if (cached && cached.exp - 60_000 > Date.now()) return cached.token;
     const res = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(cfg.MS_TENANT_ID!)}/oauth2/v2.0/token`, {
       method: 'POST',
@@ -41,12 +42,20 @@ export function createMailer(cfg: Config): Mailer {
       provider: 'graph',
       from: cfg.MAIL_FROM!,
       async send(m) {
-        const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.MAIL_FROM!)}/sendMail`, {
-          method: 'POST',
-          headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ message: { subject: m.subject, body: { contentType: 'HTML', content: m.html }, toRecipients: [{ emailAddress: { address: m.to } }] }, saveToSentItems: true }),
-        });
-        if (!res.ok) throw new Error(`Microsoft Graph respondió ${res.status} al enviar. Revisa el permiso Mail.Send y el buzón remitente.`);
+        const post = async (fresh: boolean) =>
+          fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(cfg.MAIL_FROM!)}/sendMail`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${await token(fresh)}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ message: { subject: m.subject, body: { contentType: 'HTML', content: m.html }, toRecipients: [{ emailAddress: { address: m.to } }] }, saveToSentItems: true }),
+            signal: AbortSignal.timeout(15_000),
+          });
+        let res = await post(false);
+        // Un token pedido antes de conceder el permiso no lo trae: se pide uno nuevo y se reintenta una vez.
+        if (res.status === 401 || res.status === 403) res = await post(true);
+        if (!res.ok) {
+          const detail = ((await res.json().catch(() => ({}))) as { error?: { code?: string } }).error?.code;
+          throw new Error(`Microsoft Graph respondió ${res.status}${detail ? ` (${detail})` : ''} al enviar. Revisa el permiso Mail.Send, que el buzón ${cfg.MAIL_FROM} exista con licencia de Exchange, y la política de acceso de aplicaciones.`);
+        }
       },
     };
   }
