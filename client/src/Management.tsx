@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { ASSESSMENTS, ASSESSMENT_IDS, consentDocsFor, consentVersionLabel, type AssessmentId, type MeResponse } from '@sanithelp/shared';
 import { api } from './api';
 import { Analysis } from './analysis/Analysis';
@@ -72,34 +72,112 @@ function PasswordCard() {
   );
 }
 
+const EMAIL_RE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+const COMMON_DOMAINS = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'icloud.com', 'live.com', 'outlook.es', 'hotmail.es'];
+
+/** Campo de correos como en un cliente de correo: cada dirección queda como una etiqueta que se quita con la X, y se sugieren los dominios más comunes. */
+function EmailChips({ value, onChange, id }: { value: string[]; onChange: (v: string[]) => void; id: string }) {
+  const [text, setText] = useState('');
+  const [active, setActive] = useState(0);
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const add = (raw: string) => {
+    const parts = raw.split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (!parts.length) return;
+    onChange([...value, ...parts.filter((p) => !value.includes(p))]);
+    setText('');
+    setActive(0);
+  };
+  const at = text.indexOf('@');
+  const local = at > 0 ? text.slice(0, at) : '';
+  const typedDomain = at > 0 ? text.slice(at + 1).toLowerCase() : '';
+  const suggestions = at > 0 && !text.includes(' ') ? COMMON_DOMAINS.filter((d) => d.startsWith(typedDomain) && d !== typedDomain).map((d) => `${local}@${d}`) : [];
+  const open = focused && suggestions.length > 0;
+
+  return (
+    <div className="chips-field" onClick={() => inputRef.current?.focus()}>
+      {value.map((e) => (
+        <span key={e} className={`chip-mail${EMAIL_RE.test(e) ? '' : ' bad'}`} title={EMAIL_RE.test(e) ? undefined : 'Dirección incompleta o inválida'}>
+          {e}
+          <button type="button" aria-label={`Quitar ${e}`} onClick={(ev) => { ev.stopPropagation(); onChange(value.filter((x) => x !== e)); inputRef.current?.focus(); }}><Icon name="x" size={12} /></button>
+        </span>
+      ))}
+      <input
+        ref={inputRef}
+        id={id}
+        type="email"
+        inputMode="email"
+        autoComplete="off"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={`${id}-list`}
+        placeholder={value.length ? 'Otro correo…' : 'nombre@correo.com'}
+        value={text}
+        onFocus={() => setFocused(true)}
+        onBlur={() => { setFocused(false); add(text); }}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (/[\s,;]$/.test(v) && v.trim()) add(v);
+          else { setText(v); setActive(0); }
+        }}
+        onPaste={(e) => {
+          const t = e.clipboardData.getData('text');
+          if (/[\s,;]/.test(t.trim())) { e.preventDefault(); add(t); }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' && open) { e.preventDefault(); setActive((a) => (a + 1) % suggestions.length); }
+          else if (e.key === 'ArrowUp' && open) { e.preventDefault(); setActive((a) => (a + suggestions.length - 1) % suggestions.length); }
+          else if (e.key === 'Enter' || e.key === 'Tab') {
+            if (open && e.key === 'Enter') { e.preventDefault(); add(suggestions[active]!); }
+            else if (text.trim()) { e.preventDefault(); add(open ? suggestions[active]! : text); }
+          } else if (e.key === 'Backspace' && !text && value.length) onChange(value.slice(0, -1));
+          else if (e.key === 'Escape' && open) { e.stopPropagation(); setText(text); setFocused(false); }
+        }}
+      />
+      {open && (
+        <ul className="chips-suggest" id={`${id}-list`} role="listbox">
+          {suggestions.map((sug, i) => (
+            <li key={sug} role="option" aria-selected={i === active} className={i === active ? 'on' : ''} onMouseDown={(e) => { e.preventDefault(); add(sug); }}>{sug}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /** Enviar la credencial de la campaña por correo a una o varias personas (para responder desde el celular). */
 function EmailAccessModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
   const act = useAction();
-  const [raw, setRaw] = useState('');
+  const [emails, setEmails] = useState<string[]>([]);
   const [status, setStatus] = useState<{ enabled: boolean } | null>(null);
   const [result, setResult] = useState<{ sent: string[]; failed: string[] } | null>(null);
   useEffect(() => { api<{ enabled: boolean }>('GET', '/api/mail/status').then(setStatus).catch(() => setStatus({ enabled: false })); }, []);
-  const emails = [...new Set(raw.split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter(Boolean))];
-  const valid = emails.length > 0 && emails.length <= 20 && emails.every((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
+  const invalid = emails.filter((x) => !EMAIL_RE.test(x));
+  const valid = emails.length > 0 && emails.length <= 20 && invalid.length === 0;
   return (
     <Modal title={`Enviar credenciales · ${campaign.name}`} icon="mail" size="sm" onClose={onClose}>
       {act.error && <div className="alert error" role="alert">{act.error}</div>}
       {status && !status.enabled ? (
-        <p className="muted">El envío por correo todavía no está configurado. Pídele al administrador que cargue las llaves de Outlook (guía en <code>docs/CORREO_OUTLOOK.md</code>).</p>
+        <p className="muted">El envío por correo todavía no está configurado. Pídele al administrador que lo active en Configuración.</p>
       ) : result ? (
         <>
-          {result.sent.length > 0 && <div className="alert ok" role="status">Enviado a {result.sent.length} {result.sent.length === 1 ? 'dirección' : 'direcciones'}: {result.sent.join(', ')}</div>}
+          {result.sent.length > 0 && <div className="alert ok" role="status">Enviado a {result.sent.length} {result.sent.length === 1 ? 'persona' : 'personas'}: {result.sent.join(', ')}</div>}
           {result.failed.length > 0 && <div className="alert error" role="alert">No se pudo enviar a: {result.failed.join(', ')}. Revisa que estén bien escritas.</div>}
-          <div className="dialog-actions"><button className="btn" onClick={onClose}>Listo</button></div>
+          <div className="dialog-actions">
+            {result.failed.length > 0 && <button className="btn secondary" onClick={() => { setEmails(result.failed); setResult(null); }}>Reintentar los fallidos</button>}
+            <button className="btn" onClick={onClose}>Listo</button>
+          </div>
         </>
       ) : (
         <form noValidate onSubmit={(e) => { e.preventDefault(); void act.run(async () => setResult(await api('POST', `/api/campaigns/${campaign.id}/email-access`, { emails }))); }}>
-          <label htmlFor="ea-m">Correos de las personas (separados por coma, espacio o salto de línea)</label>
-          <textarea id="ea-m" rows={4} value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="ana@empresa.com, luis@empresa.com" />
-          <p className="muted">Cada persona recibe su propio correo con el usuario, la contraseña y el enlace para responder desde su celular. {emails.length > 0 && <strong>{emails.length} {emails.length === 1 ? 'destinatario' : 'destinatarios'}.</strong>} Las direcciones no se guardan.</p>
+          <label htmlFor="ea-m">Para</label>
+          <EmailChips id="ea-m" value={emails} onChange={setEmails} />
+          <p className="muted">Escribe un correo y pulsa <kbd>Enter</kbd>, coma o espacio para agregarlo; escribe <strong>@</strong> para ver los dominios más comunes. También puedes pegar varios a la vez. Cada persona recibe su propio correo y las direcciones no se guardan.</p>
+          {invalid.length > 0 && <p className="field-error" role="alert">Revisa las direcciones en rojo: están incompletas.</p>}
           <div className="dialog-actions">
             <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
-            <button className="btn" disabled={act.busy || !valid || !status}><Icon name="mail" /> Enviar</button>
+            <button className="btn" disabled={act.busy || !valid || !status}><Icon name="mail" /> Enviar{emails.length > 1 ? ` a ${emails.length}` : ''}</button>
           </div>
         </form>
       )}

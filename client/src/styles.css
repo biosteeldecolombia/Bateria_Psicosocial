@@ -676,3 +676,16 @@ fieldset.item.missing, .opt { border-radius: 14px; }
 .color-row { display: flex; align-items: center; gap: 0.6rem; }
 .color-row input[type='color'] { width: 3.5rem; height: 2.75rem; padding: 0.15rem; cursor: pointer; }
 .pdf-preview { width: 100%; height: 38rem; border: 1px solid var(--border); border-radius: 10px; margin-top: 1rem; background: #fff; }
+
+/* ---------- Campo de correos (etiquetas) ---------- */
+.chips-field { position: relative; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; min-height: 3rem; padding: 0.4rem 0.6rem; border: 2px solid var(--border); border-radius: 14px; background: var(--surface); cursor: text; }
+.chips-field:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
+.chips-field input, .chips-field input:focus { flex: 1 1 10rem; min-width: 8rem; width: auto; margin: 0; border: 0 !important; border-radius: 0; background: transparent !important; padding: 0.35rem 0.25rem; box-shadow: none !important; outline: none !important; }
+.chip-mail { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.3rem 0.2rem 0.7rem; border-radius: 999px; background: var(--surface-2); border: 1.5px solid var(--border); font-size: 0.95rem; max-width: 100%; overflow-wrap: anywhere; }
+.chip-mail.bad { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+.chip-mail button { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.chip-mail button:hover { background: rgba(0, 0, 0, 0.12); }
+.chips-suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 0.3rem; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgba(31, 42, 68, 0.18); max-height: 14rem; overflow: auto; }
+.chips-suggest li { padding: 0.55rem 0.75rem; border-radius: 8px; cursor: pointer; }
+.chips-suggest li.on, .chips-suggest li:hover { background: var(--brand-teal-soft); }
+kbd { font-family: inherit; font-size: 0.85em; padding: 0.05rem 0.4rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
