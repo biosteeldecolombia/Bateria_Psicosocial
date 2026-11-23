@@ -41,6 +41,7 @@ const PATHS: Record<string, ReactNode> = {
   trash: <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6" />,
   mail: <path d="M3.5 6.5h17v11h-17zM3.5 7l8.5 6.5L20.5 7" />,
   folder: <path d="M3 6.5h6l2 2.5h10v10.5H3z" />,
+  file: <path d="M6 3.5h8l4 4v13H6zM14 3.5v4h4M9 13h6M9 16.5h6" />,
 };
 
 export type IconName = keyof typeof PATHS;

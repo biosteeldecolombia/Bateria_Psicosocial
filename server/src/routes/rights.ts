@@ -115,7 +115,7 @@ export const rightsRoutes: FastifyPluginAsync = async (app) => {
     const actor = req.auth!.user;
     if (!(await verifyPassword(actor.passwordHash, body.data.password))) return reply.code(403).send({ error: 'Contraseña incorrecta.' });
     if (p.status === 'revoked' || p.status === 'declined') return reply.code(409).send({ error: 'Esta participación no admite cambios (no autorizó o sus datos fueron suprimidos).' });
-    if (!p.form) return reply.code(409).send({ error: 'La persona todavía no completa la ficha de datos generales, de donde sale su forma.' });
+    // Sin ficha todavía no hay forma calculada: la psicóloga puede fijarla a mano desde ya.
     const next = body.data.form;
     if (p.form === next) return reply.code(409).send({ error: `La persona ya está en la forma ${next}.` });
     const [intra] = await db
@@ -131,7 +131,7 @@ export const rightsRoutes: FastifyPluginAsync = async (app) => {
       reopened = true;
     }
     await db.update(participants).set({ form: next, formManual: true, ...(reopened ? { status: 'in_progress' as const, submittedAt: null } : {}) }).where(eq(participants.id, p.id));
-    await audit(db, actor.id, 'participant.form_changed', { type: 'participant', id: p.id }, { from: p.form, to: next, reason: body.data.reason, reopened });
+    await audit(db, actor.id, 'participant.form_changed', { type: 'participant', id: p.id }, { from: p.form ?? null, to: next, reason: body.data.reason, reopened });
     return { ok: true, form: next, needsIntra, status: reopened ? 'in_progress' : p.status };
   });
 
