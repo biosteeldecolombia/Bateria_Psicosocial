@@ -53,6 +53,9 @@ export const users = pgTable(
     // El usuario se guarda cifrado; la búsqueda usa el índice ciego.
     usernameBlind: text('username_blind').notNull().unique(),
     usernameEnc: text('username_enc').notNull(),
+    /** Correo de la cuenta (opcional): a él llegan los códigos de verificación y el resumen; también sirve para ingresar. */
+    emailBlind: text('email_blind').unique(),
+    emailEnc: text('email_enc'),
     fullNameEnc: text('full_name_enc').notNull(),
     professionalRegistryEnc: text('professional_registry_enc'),
     professionalDocumentEnc: text('professional_document_enc'),

@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
+import { userEmail } from '../auth/email.js';
 import { changePasswordSchema, loginSchema, mfaCodeSchema, preferencesSchema, MFA_ROLES } from '@sanithelp/shared';
 import { randomBytes, randomInt } from 'node:crypto';
 import { campaigns, users, sessions, trustedDevices } from '../db/schema.js';
@@ -52,7 +53,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
     const { username, password } = body.data;
 
-    const [user] = await db.select().from(users).where(eq(users.usernameBlind, crypto.blindIndex(username))).limit(1);
+    // Ingresa con el usuario o con el correo de la cuenta; si coinciden dos, gana el usuario.
+    const ident = crypto.blindIndex(username);
+    const found = await db.select().from(users).where(or(eq(users.usernameBlind, ident), eq(users.emailBlind, ident))).limit(2);
+    const user = found.find((u) => u.usernameBlind === ident) ?? found[0];
     // Se verifica siempre un hash para igualar tiempos y no revelar si el usuario existe.
     const passwordOk = await verifyPassword(user?.passwordHash ?? dummyHash, password);
     const locked = user?.lockedUntil && user.lockedUntil.getTime() > Date.now();
@@ -170,7 +174,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   app.get('/mfa/methods', async (req, reply) => {
     if (!req.auth) return reply.code(401).send({ error: 'No autenticado' });
     const sec = await getSetting<SecuritySettings>(db, 'security', DEFAULT_SECURITY);
-    return { totp: true, email: mailer.enabled, current: req.auth.user.mfaMethod ?? (req.auth.user.mfaEnabled ? 'totp' : null), trustedDeviceDays: sec.trustedDeviceDays };
+    return { totp: true, email: mailer.enabled && !!userEmail(crypto, req.auth.user), current: req.auth.user.mfaMethod ?? (req.auth.user.mfaEnabled ? 'totp' : null), trustedDeviceDays: sec.trustedDeviceDays };
   });
 
   /** Envía un código de un solo uso al correo de la cuenta (para activar el método «correo» o como alternativa a la aplicación). */
@@ -180,12 +184,14 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     if (!MFA_ROLES.includes(user.role)) return reply.code(403).send({ error: 'Sin permiso' });
     if (!mailer.enabled) return reply.code(409).send({ error: 'El correo no está configurado. Usa la aplicación de autenticación o pídele al administrador que lo active.' });
     if (req.auth.status === 'ready' && user.mfaEnabled) return reply.code(409).send({ error: 'Ya verificaste esta sesión.' });
+    const to = userEmail(crypto, user);
+    if (!to) return reply.code(409).send({ error: 'Tu cuenta no tiene un correo registrado. Pídele al administrador que lo agregue, o usa la aplicación de autenticación.' });
     // Un reenvío cada 30 s como máximo
     if (session.otpExpiresAt && session.otpExpiresAt.getTime() - OTP_MINUTES * 60_000 + 30_000 > Date.now()) return reply.code(429).send({ error: 'Espera unos segundos antes de pedir otro código.' });
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     await db.update(sessions).set({ otpHash: crypto.hashToken(`otp:${session.id}:${code}`), otpExpiresAt: new Date(Date.now() + OTP_MINUTES * 60_000), otpAttempts: 0 }).where(eq(sessions.id, session.id));
     try {
-      await mailer.send(otpEmail({ to: crypto.decrypt(user.usernameEnc), code, minutes: OTP_MINUTES }));
+      await mailer.send(otpEmail({ to, code, minutes: OTP_MINUTES }));
     } catch (e) {
       req.log.error({ err: (e as Error).message }, 'No se pudo enviar el código de verificación');
       return reply.code(502).send({ error: 'No se pudo enviar el correo. Intenta con la aplicación de autenticación.' });

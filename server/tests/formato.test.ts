@@ -55,7 +55,7 @@ describe('formato de evaluación psicológica ocupacional', () => {
     const url = `/api/participants/${participantId}/formatos/alturas`;
     const first = await psy.call('GET', url);
     expect(first.status).toBe(200);
-    expect(first.json.prefill).toMatchObject({ nombre: 'Ana Prueba', cargo: 'Operario de alturas', empresa: 'Empresa Formatos SAS', edad: String(new Date().getFullYear() - 1990) });
+    expect(first.json.prefill).toMatchObject({ nombre: 'ANA PRUEBA', cargo: 'Operario de alturas', empresa: 'Empresa Formatos SAS', edad: String(new Date().getFullYear() - 1990) });
     expect(first.json.test).toMatchObject({ type: 'acrofobia', anxiety: { total: 100, level: 'Alto' }, avoidance: { total: 40, level: 'Alto' } });
     expect(first.json.saved).toBeNull();
     expect((await pdf(psy, `${url}/pdf`)).statusCode).toBe(409); // nada guardado todavía

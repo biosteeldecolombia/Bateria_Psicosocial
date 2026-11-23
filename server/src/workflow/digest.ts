@@ -4,6 +4,7 @@ import { users } from '../db/schema.js';
 import type { Crypto } from '../security/crypto.js';
 import type { Mailer } from '../mail/mailer.js';
 import { digestEmail } from '../mail/templates.js';
+import { userEmail } from '../auth/email.js';
 import { getSetting, putSetting } from '../settings.js';
 import { buildAlerts, loadAlertSettings } from './service.js';
 
@@ -18,8 +19,10 @@ export async function runDigestNow(db: Db, crypto: Crypto, mailer: Mailer, userI
   if (!u || !u.active || !mailer.enabled) return false;
   const lines = await digestLines(db, crypto, u);
   if (!lines.length && !force) return false;
+  const to = userEmail(crypto, u);
+  if (!to) return false;
   const name = crypto.decrypt(u.fullNameEnc);
-  await mailer.send(digestEmail({ to: crypto.decrypt(u.usernameEnc), name, lines: lines.length ? lines : ['No tienes pendientes. ¡Todo al día!'] }));
+  await mailer.send(digestEmail({ to, name, lines: lines.length ? lines : ['No tienes pendientes. ¡Todo al día!'] }));
   return true;
 }
 

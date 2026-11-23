@@ -33,7 +33,7 @@ describe('derechos del titular', () => {
     expect((await psy.call('PATCH', `/api/participants/${a!.id}`, { document: b!.document })).status).toBe(409);
     expect((await psy.call('PATCH', `/api/participants/${a!.id}`, { document: '1.234.567.890' })).status).toBe(200);
     const after = ((await psy.call('GET', `/api/campaigns/${campaignId}/participants`)).json as { id: string; document: string; fullName: string }[]).find((x) => x.id === a!.id)!;
-    expect(after.fullName).toBe('María José Peña Ortiz');
+    expect(after.fullName).toBe('MARÍA JOSÉ PEÑA ORTIZ');
     expect(after.document).toBe('1234567890');
     expect((await psy.call('PATCH', `/api/participants/${a!.id}`, {})).status).toBe(400);
   });

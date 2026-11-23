@@ -12,6 +12,8 @@ export interface UserRow {
   id: string;
   role: 'admin' | 'psychologist' | 'assistant' | 'company';
   username: string;
+  /** Correo guardado aparte (recibe los códigos de verificación). */
+  email?: string;
   fullName: string;
   professionalRegistry: string;
   professionalDocument: string;
@@ -106,6 +108,7 @@ function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { c
   const act = useAction();
   const [role, setRole] = useState<UserRow['role']>(user?.role ?? 'psychologist');
   const [username, setUsername] = useState(user?.username ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
   const [fullName, setFullName] = useState(user?.fullName ?? '');
   const [doc, setDoc] = useState(user?.professionalDocument ?? '');
   const [reg, setReg] = useState(user?.professionalRegistry ?? '');
@@ -121,12 +124,13 @@ function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { c
         ...(role === 'assistant' ? { assignedCompanyIds: ids, assignedCampaignIds: campIds } : {}),
       };
       if (user) {
-        await api('PUT', `/api/admin/users/${user.id}`, { role, username, fullName, ...extra });
+        await api('PUT', `/api/admin/users/${user.id}`, { role, username, email: email.trim(), fullName, ...extra });
         await onDone();
         onClose();
       } else {
         const r = await api<{ username: string; password: string }>('POST', '/api/admin/users', {
           role, username, fullName,
+          ...(email.trim() ? { email: email.trim() } : {}),
           ...(role === 'psychologist' ? { assignedCompanyIds: ids, ...(reg ? { professionalRegistry: reg } : {}), ...(doc ? { professionalDocument: doc } : {}) } : {}),
           ...(role === 'assistant' ? { assignedCompanyIds: ids, assignedCampaignIds: campIds } : {}),
           ...(role === 'company' ? { companyId: ids[0] } : {}),
@@ -157,8 +161,13 @@ function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { c
             <input id="uf-name" type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} />
           </div>
           <div>
-            <label htmlFor="uf-mail">Correo (es su usuario)</label>
-            <input id="uf-mail" type="email" value={username} onChange={(e) => setUsername(e.target.value)} />
+            <label htmlFor="uf-user">Usuario</label>
+            <input id="uf-user" type="text" autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="uf-mail">Correo (recibe los códigos de verificación)</label>
+            <input id="uf-mail" type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <p className="muted">Puede ingresar con su usuario o con este correo.</p>
           </div>
           {role === 'psychologist' && (
             <>
@@ -177,7 +186,7 @@ function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { c
         {role === 'assistant' && <CampaignPicker campaigns={campaigns} value={campIds} onChange={setCampIds} />}
         <h3 className="sub">Permisos del rol</h3>
         <PermissionList role={role} />
-        {user && <p className="muted">Si cambias el rol o el correo, se cerrarán las sesiones abiertas de esta cuenta.</p>}
+        {user && <p className="muted">Si cambias el rol o el usuario, se cerrarán las sesiones abiertas de esta cuenta.</p>}
         <div className="dialog-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
           <button className="btn" disabled={act.busy || fullName.trim().length < 2 || username.trim().length < 3 || (role === 'company' && !ids.length)}>
@@ -254,7 +263,7 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
     (u) =>
       (!roleFilter || u.role === roleFilter) &&
       (!statusFilter || (statusFilter === 'active') === u.active) &&
-      (!term || u.fullName.toLowerCase().includes(term) || u.username.toLowerCase().includes(term) || u.companies.some((c) => c.name.toLowerCase().includes(term))),
+      (!term || u.fullName.toLowerCase().includes(term) || u.username.toLowerCase().includes(term) || (u.email ?? '').toLowerCase().includes(term) || u.companies.some((c) => c.name.toLowerCase().includes(term))),
   );
 
   return (
@@ -296,7 +305,7 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
               {shown.map((u) => (
                 <tr key={u.id}>
                   <td><strong>{u.fullName || '—'}</strong></td>
-                  <td><code>{u.username || '—'}</code></td>
+                  <td><code>{u.username || '—'}</code>{u.email && <div className="muted">{u.email}</div>}</td>
                   <td><span className="chip"><Icon name={u.role === 'admin' ? 'shield' : u.role === 'psychologist' || u.role === 'assistant' ? 'user' : 'building'} size={14} /> {ROLE_LABEL[u.role]}</span></td>
                   <td>{u.role === 'admin' ? 'Todas' : u.companies.length || u.campaigns?.length ? <>{u.companies.map((c) => c.name).join(', ')}{u.campaigns?.length ? <span className="muted">{u.companies.length ? ' · ' : ''}{u.campaigns.length} {u.campaigns.length === 1 ? 'campaña suelta' : 'campañas sueltas'}</span> : null}</> : <span className="muted">Sin asignar</span>}</td>
                   <td>

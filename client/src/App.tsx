@@ -75,10 +75,10 @@ function Login({ onMe }: { onMe: (m: MeResponse) => void }) {
           <p className="sub">Con el usuario y la contraseña que te entregó Sanithelp</p>
           <form onSubmit={submit} noValidate aria-busy={busy}>
             <ErrorBox msg={error} />
-            <label htmlFor="u">Usuario</label>
+            <label htmlFor="u">Usuario o correo</label>
             <div className="pill-field">
               <Icon name="user" size={20} />
-              <input id="u" type="text" autoComplete="username" placeholder="Tu usuario" value={username} onChange={(e) => setUsername(e.target.value)} required />
+              <input id="u" type="text" autoComplete="username" placeholder="Tu usuario o correo" value={username} onChange={(e) => setUsername(e.target.value)} required />
             </div>
             <label htmlFor="p">Contraseña</label>
             <div className="pill-field">

@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import { createCompanySchema, createUserSchema, updateCompanySchema, updateUserSchema, MFA_ROLES } from '@sanithelp/shared';
 import { assistantCampaigns, assistantCompanies, auditLog, campaigns, companies, psychologistCompanies, users } from '../db/schema.js';
 import { assistantScope } from '../auth/access.js';
@@ -116,6 +116,12 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   /** Mensaje de error si alguna empresa o campaña asignada no existe; null si todo es válido. */
+  /** Un correo no puede repetirse ni coincidir con el usuario o el correo de otra cuenta (el ingreso acepta ambos). */
+  async function identifierTaken(blind: string, exceptId?: string): Promise<boolean> {
+    const rows = await db.select({ id: users.id }).from(users).where(or(eq(users.emailBlind, blind), eq(users.usernameBlind, blind)));
+    return rows.some((r) => r.id !== exceptId);
+  }
+
   async function invalidAssignments(companyIds: string[], campaignIds: string[]): Promise<string | null> {
     const cos = [...new Set(companyIds)];
     const cas = [...new Set(campaignIds)];
@@ -140,6 +146,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     const blind = crypto.blindIndex(input.username);
     const [dup] = await db.select({ id: users.id }).from(users).where(eq(users.usernameBlind, blind)).limit(1);
     if (dup) return reply.code(409).send({ error: 'Ya existe un usuario con ese identificador.' });
+    const emailBlind = input.email ? crypto.blindIndex(input.email) : null;
+    if (input.email && (await identifierTaken(emailBlind!))) return reply.code(409).send({ error: 'Ese correo ya está en uso por otra cuenta.' });
 
     const password = generateTempPassword(14);
     const [row] = await db
@@ -148,6 +156,8 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         role: input.role,
         usernameBlind: blind,
         usernameEnc: crypto.encrypt(input.username),
+        emailBlind,
+        emailEnc: input.email ? crypto.encrypt(input.email) : null,
         fullNameEnc: crypto.encrypt(input.fullName),
         professionalRegistryEnc: input.professionalRegistry ? crypto.encrypt(input.professionalRegistry) : null,
         professionalDocumentEnc: input.professionalDocument ? crypto.encrypt(input.professionalDocument) : null,
@@ -193,6 +203,7 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
         role: u.role,
         username: safe(u.usernameEnc),
         fullName: safe(u.fullNameEnc),
+        email: safe(u.emailEnc),
         professionalRegistry: safe(u.professionalRegistryEnc),
         professionalDocument: safe(u.professionalDocumentEnc),
         active: u.active,
@@ -289,6 +300,17 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
       set.usernameBlind = blind;
       set.usernameEnc = crypto.encrypt(input.username);
       revoke = true;
+    }
+    if (input.email !== undefined) {
+      if (input.email === '') {
+        set.emailBlind = null;
+        set.emailEnc = null;
+      } else {
+        const eb = crypto.blindIndex(input.email);
+        if (await identifierTaken(eb, id)) return reply.code(409).send({ error: 'Ese correo ya está en uso por otra cuenta.' });
+        set.emailBlind = eb;
+        set.emailEnc = crypto.encrypt(input.email);
+      }
     }
     if (input.professionalRegistry !== undefined) set.professionalRegistryEnc = input.professionalRegistry ? crypto.encrypt(input.professionalRegistry) : null;
     if (input.professionalDocument !== undefined) set.professionalDocumentEnc = input.professionalDocument ? crypto.encrypt(input.professionalDocument) : null;

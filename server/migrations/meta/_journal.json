@@ -85,6 +85,13 @@
       "when": 1794509883890,
       "tag": "0011_panel_flujo_permisos",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795460119120,
+      "tag": "0012_usuario_correo",
+      "breakpoints": true
     }
   ]
 }

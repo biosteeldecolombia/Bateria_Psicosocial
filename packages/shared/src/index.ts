@@ -116,6 +116,8 @@ export const updateCampaignSchema = z
 export const createUserSchema = z.object({
   role: z.enum(['admin', 'psychologist', 'assistant', 'company']),
   username: z.string().trim().min(3).max(200),
+  /** Correo de la cuenta (opcional): recibe los códigos de verificación y sirve también para ingresar. */
+  email: z.string().trim().toLowerCase().email().max(200).optional(),
   fullName: z.string().trim().min(2).max(200),
   companyId: z.string().uuid().optional(),
   assignedCompanyIds: z.array(z.string().uuid()).optional(),
@@ -129,6 +131,8 @@ export const createUserSchema = z.object({
 export const updateUserSchema = z.object({
   role: z.enum(['admin', 'psychologist', 'assistant', 'company']).optional(),
   username: z.string().trim().min(3).max(200).optional(),
+  /** Vacío = quitar el correo guardado. */
+  email: z.union([z.literal(''), z.string().trim().toLowerCase().email().max(200)]).optional(),
   fullName: z.string().trim().min(2).max(200).optional(),
   companyId: z.string().uuid().optional(),
   assignedCompanyIds: z.array(z.string().uuid()).optional(),

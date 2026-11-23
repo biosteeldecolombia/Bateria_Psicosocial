@@ -116,3 +116,36 @@ describe('verificación en dos pasos por correo y dispositivos de confianza', ()
     expect(after.status).toBe(401);
   });
 });
+
+describe('correo de la cuenta de personal', () => {
+  it('ingresa con el usuario o con el correo, y el código de verificación llega al correo guardado', async () => {
+    const created = await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'sandra.echeverria', email: 'Sandra@Correo.Test', fullName: 'Sandra Prueba' });
+    expect(created.status).toBe(201);
+    // Un correo repetido o que coincide con otro usuario se rechaza
+    expect((await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'otra.persona', email: 'sandra@correo.test', fullName: 'Otra Persona' })).status).toBe(409);
+    expect((await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'tercera', email: 'no-es-correo', fullName: 'Tercera Persona' })).status).toBe(400);
+
+    for (const ident of ['sandra.echeverria', 'sandra@correo.test']) {
+      const c = newClient(env);
+      expect((await c.call('POST', '/api/auth/login', { username: ident, password: created.json.password })).status).toBe(200);
+    }
+    const c = newClient(env);
+    await c.call('POST', '/api/auth/login', { username: 'sandra@correo.test', password: created.json.password });
+    mailer.sent.length = 0;
+    const r = await c.call('POST', '/api/auth/mfa/email/send');
+    expect(r.status).toBe(200);
+    expect(mailer.sent).toHaveLength(1);
+    expect(mailer.sent[0]!.to).toBe('sandra@correo.test');
+  });
+
+  it('sin correo registrado (usuario que no es correo) avisa con claridad y no intenta enviar', async () => {
+    const created = await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'sin.correo', fullName: 'Sin Correo' });
+    const c = newClient(env);
+    await c.call('POST', '/api/auth/login', { username: 'sin.correo', password: created.json.password });
+    mailer.sent.length = 0;
+    const r = await c.call('POST', '/api/auth/mfa/email/send');
+    expect(r.status).toBe(409);
+    expect(r.json.error).toContain('correo registrado');
+    expect(mailer.sent).toHaveLength(0);
+  });
+});
