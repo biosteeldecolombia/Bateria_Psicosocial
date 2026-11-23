@@ -7,6 +7,7 @@ import { audit, buildMe, loadAuth } from '../auth/service.js';
 import { campaigns } from '../db/schema.js';
 import { resumeCodeEmail } from '../mail/templates.js';
 import { setStage } from '../workflow/service.js';
+import { normalizeName } from '../results/names.js';
 
 const MAX_RESUME_ATTEMPTS = 5;
 const RESUME_LOCK_MINUTES = 15;
@@ -56,8 +57,8 @@ export const participationRoutes: FastifyPluginAsync = async (app) => {
         companyId: user.companyId!,
         documentBlind: crypto.blindIndex(body.data.document),
         documentEnc: crypto.encrypt(body.data.document),
-        fullNameEnc: crypto.encrypt(body.data.names),
-        surnamesEnc: crypto.encrypt(body.data.surnames),
+        fullNameEnc: crypto.encrypt(normalizeName(body.data.names)),
+        surnamesEnc: crypto.encrypt(normalizeName(body.data.surnames)),
         resumeCodeHash: crypto.hashToken(normalizeCode(code)),
       })
       .returning({ id: participants.id });

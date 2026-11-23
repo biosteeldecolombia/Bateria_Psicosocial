@@ -316,7 +316,8 @@ function Participants({ campaignId, qs, reason, hasPsy, assessments }: { campaig
   const [notice, setNotice] = useState('');
   if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
-  const rows = data ?? [];
+  // Las participaciones suprimidas («Dato suprimido») no se listan.
+  const rows = (data ?? []).filter((p) => p.status !== 'revoked');
   const count = (f: (p: Participant) => boolean) => rows.filter(f).length;
   return (
     <>

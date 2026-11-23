@@ -8,6 +8,7 @@ import { manageableCampaign } from '../auth/access.js';
 import { verifyPassword } from '../security/passwords.js';
 
 import { eraseParticipant } from '../results/erase.js';
+import { normalizeName } from '../results/names.js';
 
 const reopenSchema = z.object({
   instrument: z.string().min(1).max(30),
@@ -52,8 +53,8 @@ export const rightsRoutes: FastifyPluginAsync = async (app) => {
     const body = rectifySchema.safeParse(req.body);
     if (!body.success || Object.keys(body.data).length === 0) return reply.code(400).send({ error: 'Revisa los datos: nombres, apellidos y documento (5 a 20 letras o números).' });
     const set: Partial<typeof participants.$inferInsert> = {};
-    if (body.data.names) set.fullNameEnc = crypto.encrypt(body.data.names);
-    if (body.data.surnames) set.surnamesEnc = crypto.encrypt(body.data.surnames);
+    if (body.data.names) set.fullNameEnc = crypto.encrypt(normalizeName(body.data.names));
+    if (body.data.surnames) set.surnamesEnc = crypto.encrypt(normalizeName(body.data.surnames));
     if (body.data.document) {
       const blind = crypto.blindIndex(body.data.document);
       const [dup] = await db.select({ id: participants.id }).from(participants).where(and(eq(participants.campaignId, p.campaignId), eq(participants.documentBlind, blind))).limit(1);
