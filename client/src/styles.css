@@ -780,8 +780,10 @@ input[type='checkbox']:indeterminate::after { transform: scale(1); clip-path: po
 .co-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 .co-actions .btn { border-radius: 12px; width: 100%; }
 
-/* Tabla de campañas: columnas con ancho suficiente para no partir los textos en tantas líneas */
-.table th.col-co, .table td.col-co { min-width: 13rem; }
-.table th.col-name, .table td.col-name { min-width: 12rem; }
+/* Tabla de campañas: sin desplazamiento horizontal; los totales de respuestas van en columnas alineadas */
+.table th.col-co, .table td.col-co { width: 1%; white-space: nowrap; }
+.table th.col-name, .table td.col-name { min-width: 9rem; }
+.table td .mini-kpis { display: grid; grid-template-columns: 8.5rem 7.5rem 5.5rem; gap: 0.15rem 0.75rem; }
 .table td .mini-kpis li { white-space: nowrap; }
+.table td .mini-kpis strong { display: inline-block; min-width: 2.2ch; text-align: right; }
 .toolbar .field.search .icon { top: auto; bottom: 0.85rem; transform: none; }

@@ -19,7 +19,7 @@ interface Campaign { id: string; companyId: string; name: string; status: 'open'
 
 /** Totales de respuestas de una campaña, visibles sin abrir los resultados. */
 function CampaignStats({ s }: { s: Campaign['stats'] }) {
-  const items: [number, string][] = [[s.started, 'con acceso iniciado'], [s.completed, 'completaron'], [s.inProgress, 'en curso']];
+  const items: [number, string][] = [[s.started, 'acceso iniciado'], [s.completed, 'completaron'], [s.inProgress, 'en curso']];
   return (
     <ul className="mini-kpis" aria-label="Totales de respuestas">
       {items.map(([n, label]) => <li key={label}><strong>{n}</strong> {label}</li>)}
@@ -798,11 +798,10 @@ export function Management({ me }: { me: MeResponse }) {
                   <tbody>
                     {shownCampaigns.map((c) => (
                       <tr key={c.id}>
-                        <td className="col-co">{c.companyName}</td>
+                        <td className="col-co" title={c.companyName}><code>{companies.find((x) => x.id === c.companyId)?.code ?? c.companyName}</code></td>
                         <td className="col-name"><strong>{c.name}</strong></td>
                         <td>
                           {c.assessments.map((a) => <span key={a} className="chip">{ASSESSMENTS[a as AssessmentId]?.title ?? a}</span>)}
-                          <div className="muted"><small>Responsable: {c.responsibleName ?? 'la asignada a la empresa'}</small></div>
                         </td>
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
