@@ -52,21 +52,11 @@ function Progress({ done, total, label }: { done: number; total: number; label: 
 }
 
 function CampaignCard({ c, onOpen }: { c: BoardCampaign; onOpen: () => void }) {
-  const toReview = c.review.pending + c.review.in_review;
+  // Tarjeta compacta: nombre y avance. El resto (empresa, tiempos, responsables, pendientes) está en «Ver detalle».
   return (
-    <article className="wf-card">
+    <article className="wf-card" title={c.companyName}>
       <h3>{c.name}</h3>
-      <p className="muted">{c.companyName}</p>
       {c.stage === 'created' || c.stage === 'in_progress' ? <Progress done={c.stats.completed} total={c.stats.started} label="terminaron" /> : <Progress done={c.review.evaluated} total={c.stats.completed} label="evaluadas" />}
-      <ul className="wf-meta">
-        {c.stats.inProgress > 0 && <li><Icon name="users" size={14} /> {c.stats.inProgress} respondiendo</li>}
-        {toReview > 0 && (c.stage === 'finished' || c.stage === 'in_evaluation') && <li className="warn"><Icon name="clipboard" size={14} /> {toReview} por evaluar</li>}
-        <li><Icon name="refresh" size={14} /> {c.daysInStage === 0 ? 'hoy' : `hace ${c.daysInStage} d`} en esta etapa</li>
-        {c.avgMinutes != null && <li><Icon name="chart" size={14} /> promedio {fmtMinutes(c.avgMinutes)} por persona</li>}
-      </ul>
-      <p className="wf-owners muted"><small>
-        {(['application', 'evaluation', 'delivery'] as const).map((k) => c.owners[k]?.name ?? '—').join(' · ')}
-      </small></p>
       <button className="btn secondary sm" onClick={onOpen}>Ver detalle <Icon name="arrow" size={14} /></button>
     </article>
   );
@@ -127,8 +117,8 @@ function DetailModal({ c, perms, onClose, onChanged, onOpenResults }: { c: Board
                   <div key={o.key}>
                     <label htmlFor={`own-${o.key}`}>{o.label}</label>
                     <select id={`own-${o.key}`} value={owners[o.key] ?? ''} onChange={(e) => setOwners({ ...owners, [o.key]: e.target.value })}>
-                      <option value="">Sin asignar (según su rol)</option>
-                      {opts.options.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      {!owners[o.key] && <option value="">No hay personas disponibles con este rol</option>}
+                      {opts.options.filter((u) => (o.roles as readonly string[]).includes(u.role)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                   </div>
                 ))}

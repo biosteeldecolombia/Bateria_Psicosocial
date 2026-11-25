@@ -9,9 +9,9 @@ import {
 } from '@sanithelp/shared';
 import type { Db } from '../db/client.js';
 import { campaigns, companies, participants, questionnaireAnswers, users, workflowEvents } from '../db/schema.js';
-import { allowedCompanyIds, assistantScope } from '../auth/access.js';
+import { allowedCompanyIds, assistantScope, manageableCampaign } from '../auth/access.js';
 import type { Crypto } from '../security/crypto.js';
-import { getSetting } from '../settings.js';
+import { DEFAULT_OWNERS, getSetting, type DefaultOwners } from '../settings.js';
 import { formatoNotes } from './formatoNotes.js';
 
 type CampaignRow = typeof campaigns.$inferSelect;
@@ -24,6 +24,27 @@ export async function setStage(db: Db, campaignId: string, stage: WorkflowStage,
   await db.update(campaigns).set({ stage, stageChangedAt: now }).where(eq(campaigns.id, campaignId));
   await db.insert(workflowEvents).values({ campaignId, stage, at: now, actorId, note: note ?? null });
   return true;
+}
+
+export type OwnerKey = 'application' | 'evaluation' | 'delivery';
+
+/** Persona por defecto de cada proceso según los ajustes del administrador (aplicación: la auxiliar, o la psicóloga si no hay auxiliar). */
+export function defaultOwnerIds(d: DefaultOwners): Record<OwnerKey, string | null> {
+  return { application: d.assistantId ?? d.psychologistId, evaluation: d.psychologistId, delivery: d.assistantId };
+}
+
+/** Al crear una campaña deja asignado a alguien en cada proceso: la psicóloga que la crea (evaluación) y los valores por defecto, si tienen acceso. */
+export async function assignDefaultOwners(db: Db, campaignId: string, creator: { id: string; role: string }): Promise<void> {
+  const defs = defaultOwnerIds(await getSetting<DefaultOwners>(db, 'default_owners', DEFAULT_OWNERS));
+  if (creator.role === 'psychologist') defs.evaluation = creator.id;
+  const set: Partial<typeof campaigns.$inferInsert> = {};
+  for (const [k, col] of [['application', 'ownerApplicationId'], ['evaluation', 'ownerEvaluationId'], ['delivery', 'ownerDeliveryId']] as const) {
+    const id = defs[k];
+    if (!id) continue;
+    const [u] = await db.select({ id: users.id, role: users.role, active: users.active }).from(users).where(eq(users.id, id)).limit(1);
+    if (u?.active && (await manageableCampaign(db, u.id, u.role, campaignId))) set[col] = id;
+  }
+  if (Object.keys(set).length) await db.update(campaigns).set(set).where(eq(campaigns.id, campaignId));
 }
 
 /** Campañas que el usuario de personal puede ver (mismo alcance que el listado de campañas). */
@@ -93,7 +114,8 @@ export async function loadBoard(db: Db, crypto: Crypto, actor: { id: string; rol
   const ids = rows.map((c) => c.id);
   const coName = new Map((await db.select({ id: companies.id, name: companies.name }).from(companies)).map((c) => [c.id, c.name]));
 
-  const userIds = [...new Set(rows.flatMap((c) => [c.responsibleUserId, c.ownerApplicationId, c.ownerEvaluationId, c.ownerDeliveryId]).filter((x): x is string => !!x))];
+  const defs = defaultOwnerIds(await getSetting<DefaultOwners>(db, 'default_owners', DEFAULT_OWNERS));
+  const userIds = [...new Set([...rows.flatMap((c) => [c.responsibleUserId, c.ownerApplicationId, c.ownerEvaluationId, c.ownerDeliveryId]), ...Object.values(defs)].filter((x): x is string => !!x))];
   const names = new Map((userIds.length ? await db.select({ id: users.id, n: users.fullNameEnc }).from(users).where(inArray(users.id, userIds)) : []).map((u) => [u.id, safeDecrypt(crypto, u.n)]));
   const owner = (id: string | null) => (id && names.has(id) ? { id, name: names.get(id)! } : null);
 
@@ -135,7 +157,7 @@ export async function loadBoard(db: Db, crypto: Crypto, actor: { id: string; rol
         createdAt: c.createdAt.toISOString(),
         closedAt: c.closedAt?.toISOString() ?? null,
         responsibleName: c.responsibleUserId ? names.get(c.responsibleUserId) ?? null : null,
-        owners: { application: owner(c.ownerApplicationId), evaluation: owner(c.ownerEvaluationId), delivery: owner(c.ownerDeliveryId) },
+        owners: { application: owner(c.ownerApplicationId ?? defs.application), evaluation: owner(c.ownerEvaluationId ?? defs.evaluation), delivery: owner(c.ownerDeliveryId ?? defs.delivery) },
         stats: a.stats,
         review: a.review,
         daysSinceCreated: Math.floor((now - c.createdAt.getTime()) / DAY),

@@ -5,7 +5,8 @@ import { Icon } from './icons';
 import { Notice, Stepper, useAction } from './ui';
 import { Loading } from './BrandLoader';
 
-interface SettingsResponse { alerts: AlertSettings; security: { trustedDeviceDays: number }; mail: { enabled: boolean; provider: string; from: string | null } }
+interface Person { id: string; name: string }
+interface SettingsResponse { alerts: AlertSettings; security: { trustedDeviceDays: number }; defaultOwners: { psychologistId: string | null; assistantId: string | null }; staff: { psychologists: Person[]; assistants: Person[] }; mail: { enabled: boolean; provider: string; from: string | null } }
 
 const UNIT: Record<string, string> = { days: 'días', hours: 'horas', count: 'o más' };
 const ROLES_OF = (r: (typeof ALERT_RULES)[number]) => (r.roles === 'admin+psychologist' ? 'Administrador y psicóloga' : 'Auxiliar administrativo');
@@ -17,12 +18,14 @@ export function SettingsPanel() {
   const [alerts, setAlerts] = useState<AlertSettings | null>(null);
   const [days, setDays] = useState(14);
   const [to, setTo] = useState('');
+  const [defOwners, setDefOwners] = useState({ psychologistId: '', assistantId: '' });
   const [msg, setMsg] = useState('');
   const load = useCallback(async () => {
     const r = await api<SettingsResponse>('GET', '/api/settings');
     setS(r);
     setAlerts(r.alerts);
     setDays(r.security.trustedDeviceDays);
+    setDefOwners({ psychologistId: r.defaultOwners.psychologistId ?? '', assistantId: r.defaultOwners.assistantId ?? '' });
   }, []);
   useEffect(() => { void load().catch(() => undefined); }, [load]);
   if (!s || !alerts) return <Loading />;
@@ -63,6 +66,30 @@ export function SettingsPanel() {
         <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
           <button className="btn" disabled={act.busy} onClick={() => void act.run(async () => { await api('PUT', '/api/settings/alerts', alerts); await load(); setMsg('Alertas guardadas.'); })}><Icon name="check" /> Guardar alertas</button>
           <button className="btn secondary" disabled={act.busy || !s.mail.enabled} onClick={() => void act.run(async () => { await api('POST', '/api/settings/digest-test'); setMsg('Te enviamos el resumen de prueba a tu correo.'); })}>Enviarme el resumen ahora</button>
+        </div>
+      </section>
+
+      <section className="panel pad" aria-labelledby="st-own" style={{ marginTop: '1rem' }}>
+        <h2 id="st-own" className="panel-title"><Icon name="users" size={20} /> Responsables por defecto</h2>
+        <p className="muted">Cada campaña nueva queda con estas personas: la psicóloga hace la evaluación psicológica; el auxiliar administrativo entrega los informes y acompaña la aplicación. Se pueden cambiar campaña por campaña en «Flujo de trabajo».</p>
+        <div className="form-grid">
+          <div>
+            <label htmlFor="st-psy">Psicóloga por defecto</label>
+            <select id="st-psy" value={defOwners.psychologistId} onChange={(e) => setDefOwners({ ...defOwners, psychologistId: e.target.value })}>
+              <option value="">Sin definir (la primera disponible)</option>
+              {s.staff.psychologists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="st-aux">Auxiliar administrativo por defecto</label>
+            <select id="st-aux" value={defOwners.assistantId} onChange={(e) => setDefOwners({ ...defOwners, assistantId: e.target.value })}>
+              <option value="">Sin definir (el primero disponible)</option>
+              {s.staff.assistants.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
+          <button className="btn" disabled={act.busy} onClick={() => void act.run(async () => { await api('PUT', '/api/settings/default-owners', { psychologistId: defOwners.psychologistId || null, assistantId: defOwners.assistantId || null }); await load(); setMsg('Responsables por defecto guardados.'); })}><Icon name="check" /> Guardar</button>
         </div>
       </section>
 

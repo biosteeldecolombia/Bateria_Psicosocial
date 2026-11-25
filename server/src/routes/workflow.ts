@@ -1,14 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { REVIEW_STATUSES, WORKFLOW_LABEL, WORKFLOW_STAGE_KEYS, type WorkflowStage } from '@sanithelp/shared';
+import { REVIEW_STATUSES, WORKFLOW_LABEL, WORKFLOW_OWNERS, WORKFLOW_STAGE_KEYS, type WorkflowStage } from '@sanithelp/shared';
 import { campaigns, participants, users, workflowEvents } from '../db/schema.js';
 import { manageableCampaign } from '../auth/access.js';
 import { audit } from '../auth/service.js';
 import { putSetting } from '../settings.js';
-import { autoAdvanceFromReviews, buildAlerts, loadAlertSettings, loadBoard, responseTimes, setStage } from '../workflow/service.js';
+import { autoAdvanceFromReviews, buildAlerts, defaultOwnerIds, loadAlertSettings, loadBoard, responseTimes, setStage } from '../workflow/service.js';
 import { digestLines, runDigestNow } from '../workflow/digest.js';
-import { DEFAULT_SECURITY, getSetting, type SecuritySettings } from '../settings.js';
+import { DEFAULT_OWNERS, DEFAULT_SECURITY, getSetting, type DefaultOwners, type SecuritySettings } from '../settings.js';
 
 const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
 
@@ -90,7 +90,17 @@ export const workflowRoutes: FastifyPluginAsync = async (app) => {
         }
       }
     }
-    return { owners: { application: c.ownerApplicationId, evaluation: c.ownerEvaluationId, delivery: c.ownerDeliveryId }, options: out.sort((a, b) => a.name.localeCompare(b.name, 'es')) };
+    const sorted = out.sort((x, y) => x.name.localeCompare(y.name, 'es'));
+    // Cada proceso propone a quien ya estaba asignado; si no hay nadie, la persona por defecto de los ajustes; y si tampoco, la primera de la lista.
+    const defs = defaultOwnerIds(await getSetting<DefaultOwners>(db, 'default_owners', DEFAULT_OWNERS));
+    const stored = { application: c.ownerApplicationId, evaluation: c.ownerEvaluationId, delivery: c.ownerDeliveryId };
+    const owners: Record<string, string | null> = {};
+    for (const o of WORKFLOW_OWNERS) {
+      const eligible = sorted.filter((u) => (o.roles as readonly string[]).includes(u.role));
+      const pick = [stored[o.key], defs[o.key]].find((id) => id && eligible.some((u) => u.id === id));
+      owners[o.key] = pick ?? eligible[0]?.id ?? null;
+    }
+    return { owners, options: sorted };
   });
 
   app.put('/campaigns/:id/owners', { preHandler: manage }, async (req, reply) => {
@@ -106,6 +116,8 @@ export const workflowRoutes: FastifyPluginAsync = async (app) => {
       if (v !== null) {
         const [u] = await db.select({ id: users.id, role: users.role, active: users.active }).from(users).where(eq(users.id, v)).limit(1);
         if (!u || !u.active || u.role === 'collaborator' || u.role === 'company' || !(await manageableCampaign(db, u.id, u.role, c.id))) return reply.code(400).send({ error: 'Esa persona no tiene acceso a esta campaña.' });
+        const allowed = WORKFLOW_OWNERS.find((o) => o.key === k)!.roles as readonly string[];
+        if (!allowed.includes(u.role)) return reply.code(400).send({ error: k === 'evaluation' ? 'La evaluación psicológica solo puede asignarse a una psicóloga.' : k === 'delivery' ? 'La entrega de informes solo puede asignarse a un auxiliar administrativo.' : 'La aplicación solo puede asignarse a una psicóloga o a un auxiliar administrativo.' });
       }
       set[col] = v;
     }
@@ -133,9 +145,18 @@ export const workflowRoutes: FastifyPluginAsync = async (app) => {
   /** Notificaciones del usuario según las reglas configuradas. */
   app.get('/notifications', { preHandler: app.requirePerm('workflow.view', 'results.view', 'campaigns.view') }, async (req) => ({ items: await buildAlerts(db, crypto, req.auth!.user) }));
 
+  /** Personal activo que puede ser responsable por defecto: psicólogas y auxiliares administrativos. */
+  async function staffByRole() {
+    const rows = await db.select().from(users).where(and(inArray(users.role, ['psychologist', 'assistant']), eq(users.active, true)));
+    const mine = (role: string) => rows.filter((u) => u.role === role).flatMap((u) => { try { return [{ id: u.id, name: crypto.decrypt(u.fullNameEnc) }]; } catch { return []; } }).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    return { psychologists: mine('psychologist'), assistants: mine('assistant') };
+  }
+
   app.get('/settings', { preHandler: app.requirePerm('settings.manage') }, async () => ({
     alerts: await loadAlertSettings(db),
     security: await getSetting<SecuritySettings>(db, 'security', DEFAULT_SECURITY),
+    defaultOwners: await getSetting<DefaultOwners>(db, 'default_owners', DEFAULT_OWNERS),
+    staff: await staffByRole(),
     mail: { enabled: mailer.enabled, provider: mailer.provider, from: mailer.from },
   }));
 
@@ -145,6 +166,17 @@ export const workflowRoutes: FastifyPluginAsync = async (app) => {
     await putSetting(db, 'alerts', body.data, req.auth!.user.id);
     await audit(db, req.auth!.user.id, 'settings.alerts_updated', undefined, { dailyEmail: body.data.dailyEmail });
     return { ok: true, alerts: await loadAlertSettings(db) };
+  });
+
+  app.put('/settings/default-owners', { preHandler: app.requirePerm('settings.manage') }, async (req, reply) => {
+    const body = z.object({ psychologistId: z.string().uuid().nullable(), assistantId: z.string().uuid().nullable() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'Datos inválidos' });
+    const staff = await staffByRole();
+    if (body.data.psychologistId && !staff.psychologists.some((p) => p.id === body.data.psychologistId)) return reply.code(400).send({ error: 'Elige una psicóloga activa.' });
+    if (body.data.assistantId && !staff.assistants.some((p) => p.id === body.data.assistantId)) return reply.code(400).send({ error: 'Elige un auxiliar administrativo activo.' });
+    await putSetting(db, 'default_owners', body.data, req.auth!.user.id);
+    await audit(db, req.auth!.user.id, 'settings.default_owners_updated', undefined, body.data);
+    return { ok: true };
   });
 
   app.put('/settings/security', { preHandler: app.requirePerm('settings.manage') }, async (req, reply) => {

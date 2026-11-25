@@ -7,7 +7,7 @@ import { assistantCampaigns, campaigns, companies, consents, exportJobs, fichaAn
 import { allowedCompanyIds as allowedIds, assistantScope, manageableCampaign } from '../auth/access.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
 import { generateTempPassword, hashPassword, verifyPassword } from '../security/passwords.js';
-import { setStage } from '../workflow/service.js';
+import { assignDefaultOwners, setStage } from '../workflow/service.js';
 import { workflowEvents } from '../db/schema.js';
 
 const uuidParam = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f-]{36}$/i.test(v);
@@ -101,6 +101,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     const password = generateTempPassword(10);
     // La psicóloga que crea la campaña es su responsable; si la crea un administrador, queda la asignada a la empresa (o la que elija después).
     const [campaign] = await db.insert(campaigns).values({ responsibleUserId: actor.role === 'psychologist' ? actor.id : null, companyId: company.id, name: body.data.name, assessments: [...new Set(body.data.assessments)], accessPasswordEnc: crypto.encrypt(password) }).returning();
+    await assignDefaultOwners(db, campaign!.id, actor).catch(() => undefined);
     await db.insert(users).values({
       role: 'collaborator',
       usernameBlind: crypto.blindIndex(username),

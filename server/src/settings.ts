@@ -24,3 +24,10 @@ export interface SecuritySettings {
   trustedDeviceDays: number;
 }
 export const DEFAULT_SECURITY: SecuritySettings = { trustedDeviceDays: 14 };
+
+/** Personas que se proponen por defecto como responsables de cada campaña (la psicóloga evalúa; la auxiliar entrega y acompaña). */
+export interface DefaultOwners {
+  psychologistId: string | null;
+  assistantId: string | null;
+}
+export const DEFAULT_OWNERS: DefaultOwners = { psychologistId: null, assistantId: null };

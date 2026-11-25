@@ -74,6 +74,8 @@ describe('flujo de trabajo por estado', () => {
     const opts = (await admin.call('GET', `/api/campaigns/${camp.id}/owner-options`)).json;
     expect(opts.options.map((o: { id: string }) => o.id)).toContain(psyId);
     expect((await admin.call('PUT', `/api/campaigns/${camp.id}/owners`, { evaluation: psyId })).status).toBe(200);
+    // La entrega de informes es solo de un auxiliar: una psicóloga con acceso tampoco puede serlo
+    expect((await admin.call('PUT', `/api/campaigns/${camp.id}/owners`, { delivery: psyId })).status).toBe(400);
     // Alguien sin acceso a la campaña no puede ser responsable
     const other = await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'otra@sanithelp.test', fullName: 'Otra Psicóloga' });
     expect((await admin.call('PUT', `/api/campaigns/${camp.id}/owners`, { delivery: other.json.id })).status).toBe(400);

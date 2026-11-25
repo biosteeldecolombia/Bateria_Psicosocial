@@ -105,11 +105,11 @@ export type WorkflowStage = (typeof WORKFLOW_STAGES)[number]['key'];
 export const WORKFLOW_STAGE_KEYS = WORKFLOW_STAGES.map((s) => s.key) as WorkflowStage[];
 export const WORKFLOW_LABEL: Record<WorkflowStage, string> = Object.fromEntries(WORKFLOW_STAGES.map((s) => [s.key, s.label])) as Record<WorkflowStage, string>;
 
-/** Procesos con responsable asignable. */
+/** Procesos con responsable asignable, y los roles que pueden serlo (evaluación solo psicóloga; entrega solo auxiliar). */
 export const WORKFLOW_OWNERS = [
-  { key: 'application', label: 'Aplicación (acompaña a las personas mientras responden)' },
-  { key: 'evaluation', label: 'Evaluación psicológica' },
-  { key: 'delivery', label: 'Entrega de informes' },
+  { key: 'application', label: 'Aplicación (acompaña a las personas mientras responden)', roles: ['psychologist', 'assistant'] },
+  { key: 'evaluation', label: 'Evaluación psicológica', roles: ['psychologist'] },
+  { key: 'delivery', label: 'Entrega de informes', roles: ['assistant'] },
 ] as const;
 export type WorkflowOwnerKey = (typeof WORKFLOW_OWNERS)[number]['key'];
 
