@@ -92,6 +92,7 @@ const ACTIONS: Record<string, string> = {
   'user.password_reset': 'Restableció una contraseña',
   'user.activated': 'Activó una cuenta',
   'user.deactivated': 'Desactivó una cuenta',
+  'user.deleted': 'Eliminó definitivamente una cuenta',
   'user.unlocked': 'Desbloqueó una cuenta',
   'user.companies_updated': 'Cambió las empresas de una cuenta',
   'user.signature_viewed': 'Vio la firma de una psicóloga',

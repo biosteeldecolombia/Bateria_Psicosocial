@@ -246,3 +246,38 @@ export function EmptyState({ icon, text, children }: { icon: IconName; text: str
     </div>
   );
 }
+
+/** Confirmación de eliminación definitiva: pide la contraseña y, si se indica, escribir el nombre exacto. */
+export function DeleteDialog({ title, warning, confirmName, blocked, onConfirm, onClose }: { title: string; warning: string; confirmName?: string; blocked?: string; onConfirm: (password: string, typed: string) => Promise<void>; onClose: () => void }) {
+  const act = useAction();
+  const [pwd, setPwd] = useState('');
+  const [typed, setTyped] = useState('');
+  return (
+    <Modal title={title} icon="alert" size="sm" onClose={onClose}>
+      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      <p style={{ marginTop: 0 }}>{warning}</p>
+      {blocked ? <div className="alert error" role="status">{blocked}</div> : (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void act.run(async () => { await onConfirm(pwd, typed); onClose(); });
+          }}
+        >
+          {confirmName && (
+            <>
+              <label htmlFor="dl-n">Escribe <strong>{confirmName}</strong> para confirmar</label>
+              <input id="dl-n" type="text" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+            </>
+          )}
+          <label htmlFor="dl-p">Tu contraseña</label>
+          <input id="dl-p" type="password" autoComplete="current-password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
+          <div className="dialog-actions">
+            <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+            <button className="btn danger" disabled={act.busy || !pwd || (!!confirmName && typed !== confirmName)}><Icon name="trash" /> Eliminar definitivamente</button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}

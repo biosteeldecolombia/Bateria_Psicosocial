@@ -90,6 +90,23 @@ describe('flujo de trabajo por estado', () => {
     expect(board.owners.evaluation.name).toBe('Psicóloga Flujo');
   });
 
+  it('elimina definitivamente una cuenta de personal y deja sin asignar lo que tenía', async () => {
+    const tmp = await admin.call('POST', '/api/admin/users', { role: 'psychologist', username: 'borrar@sanithelp.test', fullName: 'Psicóloga Temporal', assignedCompanyIds: [camp.companyId] });
+    expect(tmp.status).toBe(201);
+    const tmpId = tmp.json.id as string;
+    expect((await admin.call('PUT', `/api/campaigns/${camp.id}/owners`, { application: tmpId })).status).toBe(200);
+    expect((await admin.call('DELETE', `/api/admin/users/${tmpId}`, { password: 'incorrecta' })).status).toBe(403);
+    expect((await admin.call('DELETE', `/api/admin/users/${tmpId}`, { password: ADMIN_PW })).status).toBe(200);
+    const list = (await admin.call('GET', '/api/admin/users')).json as { id: string }[];
+    expect(list.some((u) => u.id === tmpId)).toBe(false);
+    const row = await env.pool.query('SELECT owner_application_id FROM campaigns WHERE id = $1', [camp.id]);
+    expect(row.rows[0].owner_application_id).toBeNull();
+    // Ni a sí misma ni a un usuario inexistente
+    const me = (await admin.call('GET', '/api/admin/users')).json as { id: string; role: string }[];
+    const adminId = me.find((u) => u.role === 'admin')!.id;
+    expect((await admin.call('DELETE', `/api/admin/users/${adminId}`, { password: ADMIN_PW })).status).toBe(409);
+  });
+
   it('los permisos del flujo se respetan: sin «cambiar etapas» la psicóloga no puede moverla', async () => {
     const cur = (await admin.call('GET', '/api/admin/roles')).json.matrix.psychologist;
     await admin.call('PUT', '/api/admin/roles/psychologist', { permissions: { ...cur, 'workflow.manage': false } });

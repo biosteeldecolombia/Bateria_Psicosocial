@@ -1,8 +1,10 @@
+import fs from 'node:fs';
 import type { FastifyPluginAsync } from 'fastify';
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import { createCompanySchema, createUserSchema, updateCompanySchema, updateUserSchema, MFA_ROLES } from '@sanithelp/shared';
-import { assistantCampaigns, assistantCompanies, auditLog, campaigns, companies, psychologistCompanies, users } from '../db/schema.js';
+import { assistantCampaigns, assistantCompanies, auditLog, campaigns, companies, exportJobs, psychologistCompanies, users } from '../db/schema.js';
 import { assistantScope } from '../auth/access.js';
+import { DEFAULT_OWNERS, getSetting, putSetting, type DefaultOwners } from '../settings.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
 import { parseSignature, signatureOfEnc } from './profile.js';
 import { generateTempPassword, hashPassword, validatePasswordPolicy, verifyPassword } from '../security/passwords.js';
@@ -416,6 +418,42 @@ export const adminRoutes: FastifyPluginAsync = async (app) => {
     await db.update(users).set({ active }).where(eq(users.id, id));
     if (!active) await revokeUserSessions(db, id);
     await audit(db, req.auth!.user.id, active ? 'user.activated' : 'user.deactivated', { type: 'user', id });
+    return { ok: true };
+  });
+
+  /**
+   * Elimina definitivamente una cuenta de personal (no la credencial de una campaña, que se va con su campaña). Exige la contraseña.
+   * Se borran sus sesiones, asignaciones y exportaciones; en las campañas donde era responsable queda sin asignar. La auditoría
+   * conserva lo que hizo (con su identificador) y registra la eliminación.
+   */
+  app.delete('/admin/users/:id', { preHandler: app.requirePerm('users.manage') }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!uuidParam(id)) return reply.code(400).send({ error: 'Identificador inválido' });
+    const actor = req.auth!.user;
+    const pw = (req.body as { password?: unknown } | null)?.password;
+    if (typeof pw !== 'string' || !(await verifyPassword(actor.passwordHash, pw))) return reply.code(403).send({ error: 'Contraseña incorrecta.' });
+    const [target] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (!target || target.role === 'collaborator') return reply.code(404).send({ error: 'Usuario no encontrado' });
+    if (target.id === actor.id) return reply.code(409).send({ error: 'No puedes eliminar tu propia cuenta.' });
+    if (target.role === 'admin') {
+      const others = await db.select({ id: users.id }).from(users).where(and(eq(users.role, 'admin'), eq(users.active, true)));
+      if (!others.some((o) => o.id !== id)) return reply.code(409).send({ error: 'Debe quedar al menos un administrador activo.' });
+    }
+    const jobs = await db.select({ filePath: exportJobs.filePath }).from(exportJobs).where(eq(exportJobs.requestedBy, id));
+    await db.transaction(async (tx) => {
+      await tx.delete(exportJobs).where(eq(exportJobs.requestedBy, id));
+      await tx.update(campaigns).set({ responsibleUserId: null }).where(eq(campaigns.responsibleUserId, id));
+      await tx.update(campaigns).set({ ownerApplicationId: null }).where(eq(campaigns.ownerApplicationId, id));
+      await tx.update(campaigns).set({ ownerEvaluationId: null }).where(eq(campaigns.ownerEvaluationId, id));
+      await tx.update(campaigns).set({ ownerDeliveryId: null }).where(eq(campaigns.ownerDeliveryId, id));
+      await tx.delete(users).where(eq(users.id, id)); // sesiones, asignaciones y equipos de confianza se van en cascada
+    });
+    for (const j of jobs) if (j.filePath) fs.rmSync(j.filePath, { force: true });
+    const defs = await getSetting<DefaultOwners>(db, 'default_owners', DEFAULT_OWNERS);
+    if (defs.psychologistId === id || defs.assistantId === id) {
+      await putSetting(db, 'default_owners', { psychologistId: defs.psychologistId === id ? null : defs.psychologistId, assistantId: defs.assistantId === id ? null : defs.assistantId }, actor.id);
+    }
+    await audit(db, actor.id, 'user.deleted', { type: 'user', id }, { role: target.role });
     return { ok: true };
   });
 

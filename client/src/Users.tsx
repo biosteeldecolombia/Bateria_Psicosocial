@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from './api';
 import { Icon } from './icons';
-import { EmptyState, Modal, RowMenu, SelectAll, StatusBadge, useAction } from './ui';
+import { DeleteDialog, EmptyState, Modal, RowMenu, SelectAll, StatusBadge, useAction } from './ui';
 import { Loading } from './BrandLoader';
 import { SignatureEditor } from './Signature';
 
@@ -230,6 +230,7 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [edit, setEdit] = useState<UserRow | null>(null);
+  const [del, setDel] = useState<UserRow | null>(null);
   const [pwdUser, setPwdUser] = useState<UserRow | null>(null);
   const viewKey = (u: UserRow) => void act.run(async () => {
     const r = await api<{ username: string; password: string | null; changedByUser: boolean }>('GET', `/api/admin/users/${u.id}/credential`);
@@ -322,6 +323,7 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
                             await reload();
                           }),
                         },
+                        { label: 'Eliminar cuenta', icon: 'trash' as const, danger: true, onSelect: () => setDel(u) },
                       ]}
                     />
                   </td>
@@ -333,6 +335,15 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
       )}
 
       {openNew && <UserForm companies={companies} campaigns={campaigns} user={null} onDone={reload} onSecret={onSecret} onClose={onCloseNew} />}
+      {del && (
+        <DeleteDialog
+          title={`Eliminar la cuenta de ${nameOf(del)}`}
+          warning="La cuenta se borra de forma definitiva: sus sesiones, asignaciones y exportaciones. En las campañas donde era responsable quedará sin asignar. El registro de auditoría de lo que hizo se conserva. Esta acción no se puede deshacer; si solo quieres impedir que ingrese, mejor desactívala."
+          confirmName={nameOf(del)}
+          onConfirm={async (password) => { await api('DELETE', `/api/admin/users/${del.id}`, { password }); await reload(); }}
+          onClose={() => setDel(null)}
+        />
+      )}
       {edit && <UserForm key={edit.id} companies={companies} campaigns={campaigns} user={edit} onDone={reload} onSecret={onSecret} onClose={() => setEdit(null)} />}
       {pwdUser && <PasswordForm user={pwdUser} onSecret={onSecret} onClose={() => setPwdUser(null)} />}
     </>

@@ -6,7 +6,7 @@ import { SignatureEditor } from './Signature';
 import { Audit } from './Audit';
 import { ConsentHeader } from './flow/ConsentHeader';
 import { Icon, type IconName } from './icons';
-import { CopyButton, EmptyState, Modal, Notice, RowMenu, SecretModal, SelectAll, StatusBadge, useAction, type Secret } from './ui';
+import { CopyButton, DeleteDialog, EmptyState, Modal, Notice, RowMenu, SecretModal, SelectAll, StatusBadge, useAction, type Secret } from './ui';
 import { Workflow } from './Workflow';
 import { RolesMatrix } from './RolesMatrix';
 import { SettingsPanel } from './SettingsPanel';
@@ -350,41 +350,6 @@ function RenameCampaign({ campaign, onDone, onClose }: { campaign: Campaign; onD
           <button className="btn" disabled={act.busy || name.trim().length < 2 || (!nameChanged && !respChanged)}><Icon name="check" /> Guardar</button>
         </div>
       </form>
-    </Modal>
-  );
-}
-
-/** Confirmación de eliminación definitiva: pide la contraseña y, si se indica, escribir el nombre exacto. */
-function DeleteDialog({ title, warning, confirmName, blocked, onConfirm, onClose }: { title: string; warning: string; confirmName?: string; blocked?: string; onConfirm: (password: string, typed: string) => Promise<void>; onClose: () => void }) {
-  const act = useAction();
-  const [pwd, setPwd] = useState('');
-  const [typed, setTyped] = useState('');
-  return (
-    <Modal title={title} icon="alert" size="sm" onClose={onClose}>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
-      <p style={{ marginTop: 0 }}>{warning}</p>
-      {blocked ? <div className="alert error" role="status">{blocked}</div> : (
-        <form
-          noValidate
-          onSubmit={(e) => {
-            e.preventDefault();
-            void act.run(async () => { await onConfirm(pwd, typed); onClose(); });
-          }}
-        >
-          {confirmName && (
-            <>
-              <label htmlFor="dl-n">Escribe <strong>{confirmName}</strong> para confirmar</label>
-              <input id="dl-n" type="text" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
-            </>
-          )}
-          <label htmlFor="dl-p">Tu contraseña</label>
-          <input id="dl-p" type="password" autoComplete="current-password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
-          <div className="dialog-actions">
-            <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
-            <button className="btn danger" disabled={act.busy || !pwd || (!!confirmName && typed !== confirmName)}><Icon name="trash" /> Eliminar definitivamente</button>
-          </div>
-        </form>
-      )}
     </Modal>
   );
 }
