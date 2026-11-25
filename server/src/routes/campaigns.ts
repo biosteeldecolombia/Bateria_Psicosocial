@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import fs from 'node:fs';
 import { randomInt } from 'node:crypto';
 import { campaignStatusSchema, createCampaignSchema, updateCampaignSchema } from '@sanithelp/shared';
-import { assistantCampaigns, campaigns, companies, consents, exportJobs, fichaAnswers, participants, psychologistCompanies, questionnaireAnswers, users } from '../db/schema.js';
+import { assistantCampaigns, campaigns, companies, consents, exportJobs, fichaAnswers, manualResults, participants, psychologistCompanies, questionnaireAnswers, users } from '../db/schema.js';
 import { allowedCompanyIds as allowedIds, assistantScope, manageableCampaign } from '../auth/access.js';
 import { audit, revokeUserSessions } from '../auth/service.js';
 import { generateTempPassword, hashPassword, verifyPassword } from '../security/passwords.js';
@@ -219,6 +219,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
       const ids = people.map((p) => p.id);
       if (ids.length) {
         await tx.delete(questionnaireAnswers).where(inArray(questionnaireAnswers.participantId, ids));
+        await tx.delete(manualResults).where(inArray(manualResults.participantId, ids));
         await tx.delete(fichaAnswers).where(inArray(fichaAnswers.participantId, ids));
         await tx.delete(consents).where(inArray(consents.participantId, ids));
       }
