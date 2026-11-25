@@ -52,9 +52,12 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
           : [];
     // Totales por campaña y estado (sin abrir los resultados): iniciaron, completaron, en curso, no autorizaron, revocaron.
     const stats = new Map<string, { started: number; completed: number; inProgress: number; declined: number; revoked: number }>();
+    const total = new Map<string, number>();
     for (const r of await db.select({ id: participants.campaignId, status: participants.status, n: sql<number>`count(*)::int` }).from(participants).groupBy(participants.campaignId, participants.status)) {
       const s = stats.get(r.id) ?? { started: 0, completed: 0, inProgress: 0, declined: 0, revoked: 0 };
-      s.started += r.n;
+      // Las participaciones suprimidas («revocadas») no cuentan como iniciadas: tampoco se listan en Participantes.
+      if (r.status !== 'revoked') s.started += r.n;
+      total.set(r.id, (total.get(r.id) ?? 0) + r.n);
       if (r.status === 'completed') s.completed += r.n;
       else if (r.status === 'in_progress') s.inProgress += r.n;
       else if (r.status === 'declined') s.declined += r.n;
@@ -68,7 +71,7 @@ export const campaignRoutes: FastifyPluginAsync = async (app) => {
     for (const c of rows) {
       const u = await accessUserOf(c.id);
       const st = stats.get(c.id) ?? { started: 0, completed: 0, inProgress: 0, declined: 0, revoked: 0 };
-      out.push({ ...c, participantCount: st.started, stats: st, companyName: names.get(c.companyId) ?? '', responsibleName: c.responsibleUserId ? respNames.get(c.responsibleUserId) ?? null : null, accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
+      out.push({ ...c, participantCount: total.get(c.id) ?? 0, stats: st, companyName: names.get(c.companyId) ?? '', responsibleName: c.responsibleUserId ? respNames.get(c.responsibleUserId) ?? null : null, accessUsername: u ? crypto.decrypt(u.usernameEnc) : null });
     }
     return out;
   });

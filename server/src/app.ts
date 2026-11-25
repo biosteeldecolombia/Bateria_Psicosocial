@@ -80,6 +80,7 @@ export async function buildApp(cfg: Config, db: Db, opts: { mailer?: Mailer } = 
         imgSrc: ["'self'", 'data:'], // data: para el QR de MFA
         fontSrc: ["'self'"],
         connectSrc: ["'self'"],
+        frameSrc: ["'self'", 'blob:'], // vista previa de los PDF (se crea en el navegador como blob:)
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         baseUri: ["'self'"],

@@ -106,7 +106,7 @@ export async function loadBoard(db: Db, crypto: Crypto, actor: { id: string; rol
   const agg = new Map<string, Agg>();
   for (const r of partRows) {
     const a = agg.get(r.campaignId) ?? { stats: { started: 0, completed: 0, inProgress: 0, declined: 0 }, review: { pending: 0, in_review: 0, evaluated: 0 }, secSum: 0, secN: 0 };
-    a.stats.started += r.n;
+    if (r.status !== 'revoked') a.stats.started += r.n;
     if (r.status === 'completed') {
       a.stats.completed += r.n;
       a.review[(r.review as ReviewStatus) in a.review ? (r.review as ReviewStatus) : 'pending'] += r.n;
