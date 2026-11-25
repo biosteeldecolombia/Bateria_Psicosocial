@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { PermissionDef, PermissionKey } from '@sanithelp/shared';
 import { api } from './api';
 import { Icon } from './icons';
-import { useAction } from './ui';
+import { useAction, Notice } from './ui';
 import { Loading } from './BrandLoader';
 
 type Matrix = Record<string, Record<string, boolean>>;
@@ -35,8 +35,8 @@ export function RolesMatrix() {
     <section aria-labelledby="rm-t">
       <h2 id="rm-t" className="sub">Roles y permisos</h2>
       <p className="muted">Marca lo que puede hacer cada rol. Los cambios se aplican en cuanto los guardas. El administrador siempre tiene todos los permisos. Lo marcado con un punto es distinto del valor por defecto.</p>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
-      {saved && <div className="alert ok" role="status">{saved}</div>}
+      {act.error && <Notice kind="error" onClose={() => act.setError('')}>{act.error}</Notice>}
+      {saved && <Notice onClose={() => setSaved('')}>{saved}</Notice>}
       <div className="panel table-wrap">
         <table className="table perm-matrix">
           <caption className="sr-only">Permisos de cada rol</caption>

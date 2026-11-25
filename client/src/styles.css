@@ -689,3 +689,69 @@ fieldset.item.missing, .opt { border-radius: 14px; }
 .chips-suggest li { padding: 0.55rem 0.75rem; border-radius: 8px; cursor: pointer; }
 .chips-suggest li.on, .chips-suggest li:hover { background: var(--brand-teal-soft); }
 kbd { font-family: inherit; font-size: 0.85em; padding: 0.05rem 0.4rem; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
+
+/* ===== Campos de formulario con un mismo diseño (sin controles nativos antiguos) ===== */
+input[type='date'], input[type='number'], input[type='time'], input[type='datetime-local'], textarea {
+  width: 100%; min-height: 2.75rem; padding: 0.55rem 1.1rem; font: inherit; color: var(--text);
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); border: 1.5px solid var(--border); border-radius: 999px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+textarea { border-radius: 16px; resize: vertical; }
+input[type='date']:focus, input[type='time']:focus, input[type='datetime-local']:focus, textarea:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+input[type='date'], input[type='time'], input[type='datetime-local'] { color-scheme: light dark; }
+:root[data-theme='dark'] input[type='date'], :root[data-theme='dark'] input[type='time'] { color-scheme: dark; }
+:root[data-theme='light'] input[type='date'], :root[data-theme='light'] input[type='time'] { color-scheme: light; }
+
+/* Listas desplegables con flecha propia */
+select {
+  appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 2.6rem !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7a99' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 1rem center; background-size: 1rem;
+}
+select[multiple] { background-image: none; padding-right: 1.1rem !important; border-radius: 16px; }
+
+/* Casillas y opciones */
+input[type='checkbox'], input[type='radio'] {
+  appearance: none; -webkit-appearance: none; flex: none; display: inline-grid; place-content: center; width: 1.4rem; height: 1.4rem;
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); border: 1.5px solid var(--border); cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+input[type='checkbox'] { border-radius: 7px; }
+input[type='radio'] { border-radius: 50%; }
+input[type='checkbox']::after { content: ''; width: 0.8rem; height: 0.8rem; background: var(--on-primary); transform: scale(0); transition: transform 0.12s ease; clip-path: polygon(14% 52%, 0 66%, 38% 100%, 100% 20%, 86% 6%, 38% 72%); }
+input[type='radio']::after { content: ''; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--on-primary); transform: scale(0); transition: transform 0.12s ease; }
+input[type='checkbox']:checked, input[type='radio']:checked { background: var(--primary); border-color: var(--primary); }
+input[type='checkbox']:checked::after, input[type='radio']:checked::after { transform: scale(1); }
+input[type='checkbox']:focus-visible, input[type='radio']:focus-visible { outline: none; box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 30%, transparent); }
+input[type='checkbox']:disabled, input[type='radio']:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Deslizadores y selector de archivo */
+input[type='range'] { accent-color: var(--primary); }
+input[type='file'] { width: 100%; font: inherit; color: var(--text); }
+input[type='file']::file-selector-button {
+  margin-right: 0.9rem; padding: 0.5rem 1.1rem; font: inherit; font-weight: 700; color: var(--text); cursor: pointer;
+  background: color-mix(in srgb, var(--surface) 55%, transparent); border: 1.5px solid var(--border); border-radius: 999px;
+}
+input[type='file']::file-selector-button:hover { border-color: var(--primary); }
+
+/* Contador con botones − / + */
+.stepper { display: inline-flex; align-items: center; gap: 0.35rem; }
+.stepper input[type='number'] { width: 5rem; text-align: center; padding-left: 0.5rem; padding-right: 0.5rem; appearance: textfield; -moz-appearance: textfield; }
+.stepper input[type='number']::-webkit-outer-spin-button, .stepper input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper-btn {
+  display: inline-grid; place-content: center; width: 2.75rem; height: 2.75rem; padding: 0; font: inherit; font-size: 1.25rem; font-weight: 700; line-height: 1;
+  color: var(--text); cursor: pointer; border-radius: 50%; border: 1.5px solid var(--border); background: color-mix(in srgb, var(--surface) 55%, transparent);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.stepper-btn:hover:not(:disabled) { border-color: var(--primary); background: var(--surface-2); }
+.stepper-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Aviso flotante (resultado de una acción) */
+.notice-text { margin: 0.25rem 0 0; font-size: 1.02rem; }
+.notice-text.error { color: var(--danger); font-weight: 600; }
+.dialog-head h2 .icon.ok { color: var(--ok); }
+.dialog-head h2 .icon.bad { color: var(--danger); }
+input[type='checkbox']:indeterminate { background: var(--primary); border-color: var(--primary); }
+input[type='checkbox']:indeterminate::after { transform: scale(1); clip-path: polygon(0 40%, 100% 40%, 100% 62%, 0 62%); }

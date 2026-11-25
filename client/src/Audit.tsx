@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, ApiError } from './api';
 import { downloadFile } from './analysis/BulkExport';
 import { Icon } from './icons';
-import { EmptyState, useAction } from './ui';
+import { EmptyState, useAction, Notice } from './ui';
 import { Loading } from './BrandLoader';
 
 interface Row {
@@ -209,7 +209,7 @@ export function Audit() {
         <h1>Auditoría</h1>
         <p className="muted">Todos los movimientos de todas las cuentas. El registro es de solo inserción: nadie puede modificarlo ni borrarlo.</p>
       </div>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      {act.error && <Notice kind="error" onClose={() => act.setError('')}>{act.error}</Notice>}
 
       <section className="panel pad" aria-labelledby="au-al">
         <div className="panel-head">

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PDF_DOC_KINDS, type PdfDocKind, type PdfSettings } from '@sanithelp/shared';
 import { api, getCsrf } from './api';
 import { Icon } from './icons';
-import { useAction } from './ui';
+import { useAction, Notice } from './ui';
 import { Loading } from './BrandLoader';
 
 /**
@@ -52,8 +52,8 @@ export function PdfFormats() {
         <h1>Formatos PDF</h1>
         <p className="muted">Código, versión y apariencia de los documentos que genera la plataforma. El código y la versión salen arriba a la derecha de cada página, junto al logo.</p>
       </div>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
-      {saved && <div className="alert ok" role="status">{saved}</div>}
+      {act.error && <Notice kind="error" onClose={() => act.setError('')}>{act.error}</Notice>}
+      {saved && <Notice onClose={() => setSaved('')}>{saved}</Notice>}
       {missing.length > 0 && <div className="alert error" role="status">{missing.length === 1 ? 'Falta el código de un formato' : `Faltan los códigos de ${missing.length} formatos`}: mientras no los asignes, el PDF dice «POR ASIGNAR» (así no se inventa un código documental).</div>}
 
       <section className="panel pad" aria-labelledby="pf-docs">

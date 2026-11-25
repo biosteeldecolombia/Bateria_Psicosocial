@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ALERT_RULES, type AlertSettings } from '@sanithelp/shared';
 import { api } from './api';
 import { Icon } from './icons';
-import { useAction } from './ui';
+import { Notice, Stepper, useAction } from './ui';
 import { Loading } from './BrandLoader';
 
 interface SettingsResponse { alerts: AlertSettings; security: { trustedDeviceDays: number }; mail: { enabled: boolean; provider: string; from: string | null } }
@@ -33,8 +33,8 @@ export function SettingsPanel() {
         <h1>Configuración</h1>
         <p className="muted">Cuándo avisar, a quién y con qué umbral. Las alertas salen en «Flujo de trabajo» y, si lo activas, también por correo cada mañana.</p>
       </div>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
-      {msg && <div className="alert ok" role="status">{msg}</div>}
+      {act.error && <Notice kind="error" onClose={() => act.setError('')}>{act.error}</Notice>}
+      {msg && <Notice onClose={() => setMsg('')}>{msg}</Notice>}
 
       <section className="panel pad" aria-labelledby="st-al">
         <h2 id="st-al" className="panel-title"><Icon name="alert" size={20} /> Alertas y notificaciones</h2>
@@ -49,7 +49,7 @@ export function SettingsPanel() {
                   <th scope="row"><span>{r.label}</span><br /><small className="muted">Ej.: «{r.template.replace('{n}', '10').replace('{days}', String(alerts.threshold[r.key] ?? r.defaultThreshold))}»</small></th>
                   <td>{ROLES_OF(r)}</td>
                   <td>
-                    <input type="number" min={0} max={1000} style={{ width: '5.5rem' }} aria-label={`Umbral de ${r.label}`} value={alerts.threshold[r.key] ?? r.defaultThreshold} onChange={(e) => setAlerts({ ...alerts, threshold: { ...alerts.threshold, [r.key]: Math.max(0, Number(e.target.value) || 0) } })} /> <span className="muted">{UNIT[r.unit ?? 'count']}</span>
+                    <Stepper label={`Umbral de ${r.label}`} min={0} max={1000} value={alerts.threshold[r.key] ?? r.defaultThreshold} onChange={(n) => setAlerts({ ...alerts, threshold: { ...alerts.threshold, [r.key]: n } })} /> <span className="muted">{UNIT[r.unit ?? 'count']}</span>
                   </td>
                 </tr>
               ))}
@@ -69,7 +69,7 @@ export function SettingsPanel() {
       <section className="panel pad" aria-labelledby="st-sec" style={{ marginTop: '1rem' }}>
         <h2 id="st-sec" className="panel-title"><Icon name="shield" size={20} /> Verificación en dos pasos</h2>
         <label htmlFor="st-days">Recordar el equipo después de verificar (días)</label>
-        <input id="st-days" type="number" min={0} max={60} style={{ width: '6rem' }} value={days} onChange={(e) => setDays(Number(e.target.value))} />
+        <Stepper id="st-days" label="Días para recordar el equipo" min={0} max={60} value={days} onChange={setDays} />
         <p className="muted">En un equipo recordado no se vuelve a pedir el código. Pon 0 para pedirlo siempre. Al restablecer una contraseña se olvidan los equipos de esa cuenta.</p>
         <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
           <button className="btn" disabled={act.busy} onClick={() => void act.run(async () => { await api('PUT', '/api/settings/security', { trustedDeviceDays: days }); await load(); setMsg('Seguridad guardada.'); })}><Icon name="check" /> Guardar</button>

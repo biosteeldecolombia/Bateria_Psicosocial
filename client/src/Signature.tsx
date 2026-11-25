@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { Icon } from './icons';
-import { useAction } from './ui';
+import { useAction, Notice } from './ui';
 import { Loading } from './BrandLoader';
 
 /** Reduce la imagen de la firma (máx. 800 × 300) y la devuelve como PNG o, si pesa demasiado, JPEG. */
@@ -53,7 +53,7 @@ export function SignatureEditor({ base, idPrefix }: { base: string; idPrefix: st
   const shown = preview ?? current;
   return (
     <div>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
+      {act.error && <Notice kind="error" onClose={() => act.setError('')}>{act.error}</Notice>}
       {shown ? (
         <div style={{ background: '#fff', border: '1px solid var(--line, #ccd)', borderRadius: 8, padding: 8, display: 'inline-block', margin: '0.5rem 0' }}>
           <img src={shown} alt={preview ? 'Vista previa de la nueva firma' : 'Firma guardada'} style={{ maxWidth: '100%', maxHeight: 120, display: 'block' }} />

@@ -5,7 +5,7 @@ import { Icon, type IconName } from '../icons';
 import { DISC_PATTERN_LABELS, ReportRow, ScoreBar } from './Reports';
 import { Loading } from '../BrandLoader';
 import { FormatoView } from './Formato';
-import { RowMenu } from '../ui';
+import { CopyButton, Modal, Notice, RowMenu } from '../ui';
 
 /** Niveles con color Y texto Y símbolo (nunca solo color). */
 const LEVEL_ICON: IconName[] = ['check', 'circle', 'half', 'triangle', 'octagon'];
@@ -103,11 +103,17 @@ export function Analysis({ campaignId, campaignName, assessments, isAdmin, canFi
       </div>
       <p className="muted">Información clínica confidencial para el profesional responsable. Cada consulta queda registrada en la auditoría.</p>
       {isAdmin && !reasonOk && (
-        <form className="alert ok" onSubmit={(e) => { e.preventDefault(); if (reason.trim().length >= 10) setReasonOk(true); }}>
-          <label htmlFor="why">Motivo del acceso a resultados clínicos (se registra)</label>
-          <input id="why" type="text" value={reason} onChange={(e) => setReason(e.target.value)} />
-          <button className="btn" disabled={reason.trim().length < 10} style={{ marginTop: '0.5rem' }}>Continuar</button>
-        </form>
+        <Modal title="Motivo del acceso" icon="shield" size="sm" onClose={onClose} dismissOnOutside={false}>
+          <form onSubmit={(e) => { e.preventDefault(); if (reason.trim().length >= 10) setReasonOk(true); }}>
+            <p style={{ marginTop: 0 }}>Vas a ver resultados clínicos. Escribe el motivo del acceso; queda registrado en la auditoría.</p>
+            <label htmlFor="why">Motivo (mínimo 10 caracteres)</label>
+            <input id="why" type="text" autoComplete="off" value={reason} onChange={(e) => setReason(e.target.value)} />
+            <div className="dialog-actions">
+              <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+              <button className="btn" disabled={reason.trim().length < 10}>Continuar</button>
+            </div>
+          </form>
+        </Modal>
       )}
       {reasonOk && (
         <>
@@ -179,11 +185,11 @@ function RightsForm({ person, mode, onClose, onDone }: { person: Participant; mo
     }
   };
   return (
-    <form className="alert" onSubmit={submit} noValidate aria-label={mode === 'edit' ? 'Corregir datos' : 'Suprimir datos'}>
+    <Modal title={mode === 'edit' ? `Corregir datos de ${person.fullName}` : `Suprimir los datos de ${person.fullName}`} icon={mode === 'edit' ? 'edit' : 'trash'} size="sm" onClose={onClose} dismissOnOutside={false}>
+    <form onSubmit={submit} noValidate aria-label={mode === 'edit' ? 'Corregir datos' : 'Suprimir datos'}>
       {mode === 'edit' ? (
         <>
-          <strong>Corregir datos de {person.fullName}</strong>
-          <p className="muted">Escribe solo lo que cambia; lo que dejes vacío se conserva.</p>
+          <p className="muted" style={{ marginTop: 0 }}>Escribe solo lo que cambia; lo que dejes vacío se conserva.</p>
           <label htmlFor="rn">Nombres</label>
           <input id="rn" value={names} onChange={(e) => setNames(e.target.value)} autoComplete="off" />
           <label htmlFor="rs">Apellidos</label>
@@ -193,16 +199,18 @@ function RightsForm({ person, mode, onClose, onDone }: { person: Participant; mo
         </>
       ) : (
         <>
-          <strong>Suprimir los datos de {person.fullName}</strong>
-          <p>Se borran sus respuestas, su ficha y sus datos personales, y deja de contar en los resultados. <strong>No se puede deshacer.</strong> Solo se conserva la constancia del consentimiento (revocada) y el registro de auditoría.</p>
+          <p style={{ marginTop: 0 }}>Se borran sus respuestas, su ficha y sus datos personales, y deja de contar en los resultados. <strong>No se puede deshacer.</strong> Solo se conserva la constancia del consentimiento (revocada) y el registro de auditoría.</p>
           <label htmlFor="rp">Tu contraseña, para confirmar</label>
           <input id="rp" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
         </>
       )}
       {error && <div className="alert error" role="alert">{error}</div>}
-      <button className={mode === 'erase' ? 'btn danger' : 'btn'} disabled={busy || (mode === 'erase' ? !password : !names && !surnames && !document)}>{mode === 'edit' ? 'Guardar cambios' : 'Suprimir definitivamente'}</button>{' '}
-      <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+      <div className="dialog-actions">
+        <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+        <button className={mode === 'erase' ? 'btn danger' : 'btn'} disabled={busy || (mode === 'erase' ? !password : !names && !surnames && !document)}>{mode === 'edit' ? 'Guardar cambios' : 'Suprimir definitivamente'}</button>
+      </div>
     </form>
+    </Modal>
   );
 }
 
@@ -243,9 +251,9 @@ function RepeatForm({ person, onClose, onDone }: { person: Participant; onClose:
     }
   };
   return (
-    <form className="alert" onSubmit={submit} noValidate aria-label="Repetir una prueba">
-      <strong>Repetir una prueba de {person.fullName}</strong>
-      <p className="muted">Se borran las respuestas de la prueba que elijas; las demás se conservan. La participación vuelve a «En curso» y la persona debe responderla de nuevo y volver a enviar.</p>
+    <Modal title={`Repetir una prueba de ${person.fullName}`} icon="refresh" size="sm" onClose={onClose} dismissOnOutside={false}>
+    <form onSubmit={submit} noValidate aria-label="Repetir una prueba">
+      <p className="muted" style={{ marginTop: 0 }}>Se borran las respuestas de la prueba que elijas; las demás se conservan. La participación vuelve a «En curso» y la persona debe responderla de nuevo y volver a enviar.</p>
       {options.length === 0 ? <p>Esta persona todavía no tiene pruebas respondidas.</p> : (
         <fieldset className="plain">
           <legend><strong>¿Qué prueba debe repetir?</strong></legend>
@@ -259,16 +267,17 @@ function RepeatForm({ person, onClose, onDone }: { person: Participant; onClose:
       <label htmlFor={`rpw-${person.id}`}>Tu contraseña, para confirmar</label>
       <input id={`rpw-${person.id}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
       {error && <div className="alert error" role="alert">{error}</div>}
-      <button className="btn" disabled={busy || !instrument || why.trim().length < 10 || !password}>{busy ? 'Reabriendo…' : 'Reabrir la prueba'}</button>{' '}
-      <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+      <div className="dialog-actions">
+        <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn" disabled={busy || !instrument || why.trim().length < 10 || !password}>{busy ? 'Reabriendo…' : 'Reabrir la prueba'}</button>
+      </div>
     </form>
+    </Modal>
   );
 }
 
 /** La persona no alcanzó a responder alguna prueba y no lo hará: se finaliza con lo que tiene para poder cerrar y evaluar. */
 function FinalizeForm({ person, onClose, onDone }: { person: Participant; onClose: () => void; onDone: (m: string) => void }) {
-  const ref = useRef<HTMLFormElement>(null);
-  useEffect(() => { ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, []);
   const [why, setWhy] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -287,24 +296,25 @@ function FinalizeForm({ person, onClose, onDone }: { person: Participant; onClos
     }
   };
   return (
-    <form ref={ref} className="alert" onSubmit={submit} noValidate aria-label="Finalizar sin las pruebas pendientes">
-      <strong>Finalizar sin las pruebas pendientes · {person.fullName}</strong>
-      <p className="muted">Úsalo cuando la persona no hizo alguna prueba y no la hará. Se conservan sus respuestas, la participación pasa a «Completó» y la prueba que falta queda sin resultado. Queda en la auditoría.</p>
+    <Modal title={`Finalizar sin las pruebas pendientes · ${person.fullName}`} icon="check" size="sm" onClose={onClose} dismissOnOutside={false}>
+    <form onSubmit={submit} noValidate aria-label="Finalizar sin las pruebas pendientes">
+      <p className="muted" style={{ marginTop: 0 }}>Úsalo cuando la persona no hizo alguna prueba y no la hará. Se conservan sus respuestas, la participación pasa a «Completó» y la prueba que falta queda sin resultado. Queda en la auditoría.</p>
       <label htmlFor={`fz-${person.id}`}>Motivo (queda en la auditoría)</label>
       <input id={`fz-${person.id}`} value={why} onChange={(e) => setWhy(e.target.value)} autoComplete="off" placeholder="Ej. No realizó la prueba de Estrés" />
       <label htmlFor={`fzp-${person.id}`}>Tu contraseña, para confirmar</label>
       <input id={`fzp-${person.id}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
       {error && <div className="alert error" role="alert">{error}</div>}
-      <button className="btn" disabled={busy || why.trim().length < 10 || !password}>{busy ? 'Guardando…' : 'Finalizar sin esas pruebas'}</button>{' '}
-      <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+      <div className="dialog-actions">
+        <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn" disabled={busy || why.trim().length < 10 || !password}>{busy ? 'Guardando…' : 'Finalizar sin esas pruebas'}</button>
+      </div>
     </form>
+    </Modal>
   );
 }
 
 /** La psicóloga fija la forma intralaboral (A o B) cuando difiere de la que resulta de la pregunta 14. */
 function FormSwitch({ person, next, onClose, onDone }: { person: Participant; next: 'A' | 'B'; onClose: () => void; onDone: (m: string) => void }) {
-  const ref = useRef<HTMLFormElement>(null);
-  useEffect(() => { ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, []);
   const [why, setWhy] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -323,17 +333,20 @@ function FormSwitch({ person, next, onClose, onDone }: { person: Participant; ne
     }
   };
   return (
-    <form ref={ref} className="alert" onSubmit={submit} noValidate aria-label="Cambiar la forma">
-      <strong>Cambiar a la forma {next} · {person.fullName}</strong>
-      <p className="muted">{person.form ? <>Hoy está en la forma {person.form}{person.formManual ? ' (fijada a mano)' : ' (según la pregunta 14 de la ficha)'}.</> : 'Todavía no tiene forma (no ha completado la ficha); la fijas tú desde ya.'} Se conservan todas las respuestas; si todavía no tiene completo el intralaboral de la forma {next}, la participación vuelve a «En curso» para que lo responda. Los resultados se calculan con la forma {next}.</p>
+    <Modal title={`Cambiar a la forma ${next} · ${person.fullName}`} icon="refresh" size="sm" onClose={onClose} dismissOnOutside={false}>
+    <form onSubmit={submit} noValidate aria-label="Cambiar la forma">
+      <p className="muted" style={{ marginTop: 0 }}>{person.form ? <>Hoy está en la forma {person.form}{person.formManual ? ' (fijada a mano)' : ' (según la pregunta 14 de la ficha)'}.</> : 'Todavía no tiene forma (no ha completado la ficha); la fijas tú desde ya.'} Se conservan todas las respuestas; si todavía no tiene completo el intralaboral de la forma {next}, la participación vuelve a «En curso» para que lo responda. Los resultados se calculan con la forma {next}.</p>
       <label htmlFor={`fm-${person.id}`}>Motivo (queda en la auditoría)</label>
       <input id={`fm-${person.id}`} value={why} onChange={(e) => setWhy(e.target.value)} autoComplete="off" placeholder="Ej. Su cargo real es operativo, aunque marcó jefatura" />
       <label htmlFor={`fpw-${person.id}`}>Tu contraseña, para confirmar</label>
       <input id={`fpw-${person.id}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
       {error && <div className="alert error" role="alert">{error}</div>}
-      <button className="btn" disabled={busy || why.trim().length < 10 || !password}>{busy ? 'Guardando…' : `Pasar a la forma ${next}`}</button>{' '}
-      <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+      <div className="dialog-actions">
+        <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn" disabled={busy || why.trim().length < 10 || !password}>{busy ? 'Guardando…' : `Pasar a la forma ${next}`}</button>
+      </div>
     </form>
+    </Modal>
   );
 }
 
@@ -371,13 +384,16 @@ function Participants({ campaignId, qs, reason, hasPsy, assessments }: { campaig
       {pdfErr && <div className="alert error" role="alert">{pdfErr}</div>}
       {bulk && <BulkExport campaignId={campaignId} reason={reason} hasPsy={hasPsy} areas={areas.data?.values ?? []} onClose={() => setBulk(false)} />}
       {code && (
-        <div className="alert ok" role="status">
-          Nuevo código para <strong>{code.name}</strong>: <span className="big-code" style={{ fontSize: '1.3rem', display: 'inline-block', margin: 0 }}>{code.code}</span>
-          <p>Entrégaselo a la persona; no se volverá a mostrar.</p>
-          <button className="btn secondary" onClick={() => setCode(null)}>Ya lo entregué</button>
-        </div>
+        <Modal title={`Nuevo código para ${code.name}`} icon="key" size="sm" onClose={() => setCode(null)} dismissOnOutside={false}>
+          <p style={{ marginTop: 0 }}>Entrégaselo a la persona; no se volverá a mostrar.</p>
+          <div className="big-code" style={{ fontSize: '1.6rem', textAlign: 'center' }}>{code.code}</div>
+          <div className="dialog-actions">
+            <CopyButton text={code.code} />
+            <button className="btn" onClick={() => setCode(null)}>Ya lo entregué</button>
+          </div>
+        </Modal>
       )}
-      {notice && <div className="alert ok" role="status">{notice} <button className="btn secondary" onClick={() => setNotice('')}>Entendido</button></div>}
+      {notice && <Notice onClose={() => setNotice('')}>{notice}</Notice>}
       {repeat && <RepeatForm key={repeat.id} person={repeat} onClose={() => setRepeat(null)} onDone={(m) => { setRepeat(null); setNotice(m); setTick((t) => t + 1); }} />}
       {formFor && <FormSwitch key={formFor.person.id + formFor.next} person={formFor.person} next={formFor.next} onClose={() => setFormFor(null)} onDone={(m) => { setFormFor(null); setNotice(m); setTick((t) => t + 1); }} />}
       {finalizeFor && <FinalizeForm key={finalizeFor.id} person={finalizeFor} onClose={() => setFinalizeFor(null)} onDone={(m) => { setFinalizeFor(null); setNotice(m); setTick((t) => t + 1); }} />}

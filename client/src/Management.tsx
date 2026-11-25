@@ -6,7 +6,7 @@ import { SignatureEditor } from './Signature';
 import { Audit } from './Audit';
 import { ConsentHeader } from './flow/ConsentHeader';
 import { Icon, type IconName } from './icons';
-import { CopyButton, EmptyState, Modal, RowMenu, SecretModal, SelectAll, StatusBadge, useAction, type Secret } from './ui';
+import { CopyButton, EmptyState, Modal, Notice, RowMenu, SecretModal, SelectAll, StatusBadge, useAction, type Secret } from './ui';
 import { Workflow } from './Workflow';
 import { RolesMatrix } from './RolesMatrix';
 import { SettingsPanel } from './SettingsPanel';
@@ -31,43 +31,52 @@ type TabKey = 'inicio' | 'flujo' | 'empresas' | 'campanas' | 'usuarios' | 'audit
 /** Aviso de formatos de evaluación por campaña: pendientes (psicóloga) o listos para descargar (auxiliar). */
 interface FormatoNote { campaignId: string; campaignName: string; companyName: string; kind: 'alturas' | 'confinados'; count: number }
 
-/** Cambio de contraseña por la propia persona. Pide la actual y aplica la política de contraseñas. */
+/** Cambio de contraseña por la propia persona. Pide la actual y aplica la política de contraseñas; se hace en una ventana flotante. */
 function PasswordCard() {
   const act = useAction();
+  const [open, setOpen] = useState(false);
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [again, setAgain] = useState('');
   const [show, setShow] = useState(false);
   const [done, setDone] = useState(false);
   const mismatch = again !== '' && next !== again;
+  const close = () => { setOpen(false); setCur(''); setNext(''); setAgain(''); setShow(false); act.setError(''); };
   return (
     <section className="panel pad" aria-labelledby="pw" style={{ maxWidth: '40rem', marginBottom: '1rem' }}>
       <h2 id="pw" className="panel-title"><Icon name="lock" size={20} /> Cambiar mi contraseña</h2>
       <p className="muted">Mínimo 12 caracteres, sin palabras comunes ni tu nombre o correo. Al cambiarla se cierran tus otras sesiones.</p>
-      {act.error && <div className="alert error" role="alert">{act.error}</div>}
-      {done && <div className="alert ok" role="status">Listo: tu contraseña se cambió.</div>}
-      <form
-        noValidate
-        onSubmit={(e) => {
-          e.preventDefault();
-          void act.run(async () => {
-            await api('POST', '/api/auth/change-password', { currentPassword: cur, newPassword: next });
-            setCur(''); setNext(''); setAgain(''); setDone(true);
-          });
-        }}
-      >
-        <label htmlFor="pw-cur">Contraseña actual</label>
-        <input id="pw-cur" type={show ? 'text' : 'password'} autoComplete="current-password" value={cur} onChange={(e) => { setCur(e.target.value); setDone(false); }} />
-        <label htmlFor="pw-n1">Contraseña nueva</label>
-        <input id="pw-n1" type={show ? 'text' : 'password'} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
-        <label htmlFor="pw-n2">Repite la contraseña nueva</label>
-        <input id="pw-n2" type={show ? 'text' : 'password'} autoComplete="new-password" aria-invalid={mismatch} value={again} onChange={(e) => setAgain(e.target.value)} />
-        {mismatch && <p className="hint" role="alert">Las contraseñas no coinciden.</p>}
-        <label className="check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Mostrar contraseñas</label>
-        <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
-          <button className="btn" disabled={act.busy || !cur || next.length < 12 || next !== again}><Icon name="check" /> Cambiar contraseña</button>
-        </div>
-      </form>
+      <button className="btn" onClick={() => setOpen(true)}><Icon name="lock" /> Cambiar contraseña</button>
+      {done && <Notice onClose={() => setDone(false)}>Tu contraseña se cambió. Las demás sesiones abiertas se cerraron.</Notice>}
+      {open && (
+        <Modal title="Cambiar mi contraseña" icon="lock" size="sm" onClose={close} dismissOnOutside={false}>
+          {act.error && <div className="alert error" role="alert">{act.error}</div>}
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              void act.run(async () => {
+                await api('POST', '/api/auth/change-password', { currentPassword: cur, newPassword: next });
+                close();
+                setDone(true);
+              });
+            }}
+          >
+            <label htmlFor="pw-cur">Contraseña actual</label>
+            <input id="pw-cur" type={show ? 'text' : 'password'} autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} />
+            <label htmlFor="pw-n1">Contraseña nueva</label>
+            <input id="pw-n1" type={show ? 'text' : 'password'} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+            <label htmlFor="pw-n2">Repite la contraseña nueva</label>
+            <input id="pw-n2" type={show ? 'text' : 'password'} autoComplete="new-password" aria-invalid={mismatch} value={again} onChange={(e) => setAgain(e.target.value)} />
+            {mismatch && <p className="hint" role="alert">Las contraseñas no coinciden.</p>}
+            <label className="check"><input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} /> Mostrar contraseñas</label>
+            <div className="dialog-actions">
+              <button type="button" className="btn secondary" onClick={close}>Cancelar</button>
+              <button className="btn" disabled={act.busy || !cur || next.length < 12 || next !== again}><Icon name="check" /> Cambiar contraseña</button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </section>
   );
 }
@@ -586,7 +595,7 @@ export function Management({ me }: { me: MeResponse }) {
       </nav>
 
       <div role="tabpanel" id="staff-panel" aria-labelledby={`tab-${tab}`} tabIndex={0}>
-        {act.error && <div className="alert error" role="alert">{act.error}</div>}
+        {act.error && <Notice kind="error" onClose={() => act.setError('')}>{act.error}</Notice>}
 
         {tab === 'inicio' && (
           <>

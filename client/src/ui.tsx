@@ -90,6 +90,35 @@ export function Modal({ title, onClose, children, size = 'md', icon, dismissOnOu
   );
 }
 
+/**
+ * Aviso flotante con el resultado de una acción (guardado, enviado, error). Se muestra al centro y exige pulsar «Entendido»,
+ * para que no pase desapercibido como los mensajes que quedaban arriba de la pantalla.
+ */
+export function Notice({ kind = 'ok', title, children, onClose }: { kind?: 'ok' | 'error'; title?: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <Modal title={title ?? (kind === 'ok' ? 'Listo' : 'No se pudo completar')} icon={kind === 'ok' ? 'check' : 'alert'} size="sm" onClose={onClose}>
+      <div role={kind === 'error' ? 'alert' : 'status'}>
+        <p className={`notice-text${kind === 'error' ? ' error' : ''}`}>{children}</p>
+      </div>
+      <div className="dialog-actions">
+        <button className="btn" onClick={onClose}>Entendido</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Contador numérico con botones − y +, con el mismo diseño que el resto de los campos. */
+export function Stepper({ id, value, onChange, min = 0, max = 1000, label }: { id?: string; value: number; onChange: (n: number) => void; min?: number; max?: number; label: string }) {
+  const clamp = (n: number) => Math.min(max, Math.max(min, Number.isFinite(n) ? n : min));
+  return (
+    <span className="stepper" role="group" aria-label={label}>
+      <button type="button" className="stepper-btn" aria-label={`Disminuir: ${label}`} disabled={value <= min} onClick={() => onChange(clamp(value - 1))}>−</button>
+      <input id={id} type="number" inputMode="numeric" min={min} max={max} value={value} aria-label={id ? undefined : label} onChange={(e) => onChange(clamp(Number(e.target.value)))} />
+      <button type="button" className="stepper-btn" aria-label={`Aumentar: ${label}`} disabled={value >= max} onClick={() => onChange(clamp(value + 1))}>+</button>
+    </span>
+  );
+}
+
 export interface Secret { title: string; username: string; password: string; /** Se puede volver a consultar con la llave. */ view?: boolean }
 
 /** Botón que copia un texto al portapapeles y avisa «Copiado». */
