@@ -265,6 +265,42 @@ function RepeatForm({ person, onClose, onDone }: { person: Participant; onClose:
   );
 }
 
+/** La persona no alcanzó a responder alguna prueba y no lo hará: se finaliza con lo que tiene para poder cerrar y evaluar. */
+function FinalizeForm({ person, onClose, onDone }: { person: Participant; onClose: () => void; onDone: (m: string) => void }) {
+  const ref = useRef<HTMLFormElement>(null);
+  useEffect(() => { ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, []);
+  const [why, setWhy] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await api('POST', `/api/participants/${person.id}/finalize`, { reason: why, password });
+      onDone(`${person.fullName} quedó como «Completó» con las pruebas que respondió. Ya puedes cerrar la campaña.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'No se pudo finalizar la participación.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form ref={ref} className="alert" onSubmit={submit} noValidate aria-label="Finalizar sin las pruebas pendientes">
+      <strong>Finalizar sin las pruebas pendientes · {person.fullName}</strong>
+      <p className="muted">Úsalo cuando la persona no hizo alguna prueba y no la hará. Se conservan sus respuestas, la participación pasa a «Completó» y la prueba que falta queda sin resultado. Queda en la auditoría.</p>
+      <label htmlFor={`fz-${person.id}`}>Motivo (queda en la auditoría)</label>
+      <input id={`fz-${person.id}`} value={why} onChange={(e) => setWhy(e.target.value)} autoComplete="off" placeholder="Ej. No realizó la prueba de Estrés" />
+      <label htmlFor={`fzp-${person.id}`}>Tu contraseña, para confirmar</label>
+      <input id={`fzp-${person.id}`} type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+      {error && <div className="alert error" role="alert">{error}</div>}
+      <button className="btn" disabled={busy || why.trim().length < 10 || !password}>{busy ? 'Guardando…' : 'Finalizar sin esas pruebas'}</button>{' '}
+      <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
+    </form>
+  );
+}
+
 /** La psicóloga fija la forma intralaboral (A o B) cuando difiere de la que resulta de la pregunta 14. */
 function FormSwitch({ person, next, onClose, onDone }: { person: Participant; next: 'A' | 'B'; onClose: () => void; onDone: (m: string) => void }) {
   const ref = useRef<HTMLFormElement>(null);
@@ -313,6 +349,7 @@ function Participants({ campaignId, qs, reason, hasPsy, assessments }: { campaig
   const [rights, setRights] = useState<{ person: Participant; mode: 'edit' | 'erase' } | null>(null);
   const [repeat, setRepeat] = useState<Participant | null>(null);
   const [formFor, setFormFor] = useState<{ person: Participant; next: 'A' | 'B' } | null>(null);
+  const [finalizeFor, setFinalizeFor] = useState<Participant | null>(null);
   const [notice, setNotice] = useState('');
   if (loading && !data) return <Loading />;
   if (error) return <div className="alert error" role="alert">{error}</div>;
@@ -343,6 +380,7 @@ function Participants({ campaignId, qs, reason, hasPsy, assessments }: { campaig
       {notice && <div className="alert ok" role="status">{notice} <button className="btn secondary" onClick={() => setNotice('')}>Entendido</button></div>}
       {repeat && <RepeatForm key={repeat.id} person={repeat} onClose={() => setRepeat(null)} onDone={(m) => { setRepeat(null); setNotice(m); setTick((t) => t + 1); }} />}
       {formFor && <FormSwitch key={formFor.person.id + formFor.next} person={formFor.person} next={formFor.next} onClose={() => setFormFor(null)} onDone={(m) => { setFormFor(null); setNotice(m); setTick((t) => t + 1); }} />}
+      {finalizeFor && <FinalizeForm key={finalizeFor.id} person={finalizeFor} onClose={() => setFinalizeFor(null)} onDone={(m) => { setFinalizeFor(null); setNotice(m); setTick((t) => t + 1); }} />}
       {rights && <RightsForm key={rights.person.id + rights.mode} {...rights} onClose={() => setRights(null)} onDone={() => { setRights(null); setTick((t) => t + 1); }} />}
       {rows.length === 0 ? <p className="muted">Todavía nadie ha iniciado esta campaña.</p> : (
         <div className="scroll" tabIndex={0} role="region" aria-label="Tabla (desplázala con las flechas del teclado)">
@@ -395,6 +433,9 @@ function Participants({ campaignId, qs, reason, hasPsy, assessments }: { campaig
                     {p.status === 'in_progress' && (
                       <button className="icon-btn" title="Nuevo código personal (solo mientras la persona está en curso)" aria-label={`Nuevo código para ${p.fullName}`} onClick={async () => { const r = await api<{ resumeCode: string }>('POST', `/api/participants/${p.id}/reset-code`); setCode({ name: p.fullName, code: r.resumeCode }); setTick((t) => t + 1); }}><Icon name="key" /></button>
                     )}{' '}
+                    {p.status === 'in_progress' && p.consent === 'authorized' && (
+                      <><button className="icon-btn" title="Finalizar sin las pruebas pendientes" aria-label={`Finalizar sin las pruebas pendientes de ${p.fullName}`} onClick={() => { setRepeat(null); setRights(null); setFormFor(null); setFinalizeFor(p); }}><Icon name="check" /></button>{' '}</>
+                    )}
                     {p.status !== 'revoked' && (
                       <>
                         {p.consent === 'authorized' && repeatOptions(p).length > 0 && <><button className="icon-btn" title="Repetir prueba" aria-label={`Repetir prueba de ${p.fullName}`} onClick={() => { setRights(null); setFormFor(null); setRepeat(p); }}><Icon name="refresh" /></button>{' '}</>}

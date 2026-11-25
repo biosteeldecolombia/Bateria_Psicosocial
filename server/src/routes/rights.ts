@@ -16,7 +16,12 @@ const reopenSchema = z.object({
   reason: z.string().trim().min(10, 'Escribe el motivo (mínimo 10 caracteres).').max(300),
 });
 
-const formSchema = z.object({
+const reasonSchema = z.object({
+  password: z.string().min(1).max(500),
+  reason: z.string().trim().min(10, 'Escribe el motivo (mínimo 10 caracteres).').max(300),
+});
+
+const formSchema =z.object({
   form: z.enum(['A', 'B']),
   password: z.string().min(1).max(500),
   reason: z.string().trim().min(10, 'Escribe el motivo (mínimo 10 caracteres).').max(300),
@@ -100,6 +105,34 @@ export const rightsRoutes: FastifyPluginAsync = async (app) => {
     });
     await audit(db, actor.id, 'participant.instrument_reopened', { type: 'participant', id: p.id }, { instrument: body.data.instrument, reason: body.data.reason });
     return { ok: true, instrument: body.data.instrument, status: 'in_progress' };
+  });
+
+  /**
+   * Finalizar sin las pruebas pendientes: la persona no alcanzó a responder alguna prueba y no lo hará. La participación pasa a
+   * «completó» con lo que tiene, para poder cerrar la campaña y que la psicóloga evalúe. Se conservan todas las respuestas
+   * dadas; queda en la auditoría con el motivo y las pruebas que faltaban. Exige la contraseña.
+   */
+  app.post('/participants/:id/finalize', { preHandler: staff }, async (req, reply) => {
+    const p = await target(req);
+    if (!p) return reply.code(404).send({ error: 'Participante no encontrado' });
+    const body = reasonSchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: body.error.issues[0]?.message ?? 'Revisa el motivo y tu contraseña.' });
+    const actor = req.auth!.user;
+    if (!(await verifyPassword(actor.passwordHash, body.data.password))) return reply.code(403).send({ error: 'Contraseña incorrecta.' });
+    if (p.status !== 'in_progress') return reply.code(409).send({ error: 'Solo se puede finalizar a quien sigue «En curso».' });
+    const [consent] = await db.select().from(consents).where(eq(consents.participantId, p.id)).limit(1);
+    if (!consent || consent.decision !== 'authorized' || consent.revokedAt) return reply.code(409).send({ error: 'La persona no tiene un consentimiento vigente.' });
+    const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, p.campaignId)).limit(1);
+    const done = await db
+      .select({ instrument: questionnaireAnswers.instrument, complete: questionnaireAnswers.complete })
+      .from(questionnaireAnswers)
+      .where(eq(questionnaireAnswers.participantId, p.id));
+    const [ficha] = await db.select({ complete: fichaAnswers.complete }).from(fichaAnswers).where(eq(fichaAnswers.participantId, p.id)).limit(1);
+    const complete = new Set(done.filter((d) => d.complete).map((d) => d.instrument));
+    const missing = [...(ficha?.complete ? [] : ['ficha']), ...instrumentsFor(campaign?.assessments ?? [], p.form).filter((i) => !complete.has(i))];
+    await db.update(participants).set({ status: 'completed', submittedAt: new Date() }).where(eq(participants.id, p.id));
+    await audit(db, actor.id, 'participant.finalized_incomplete', { type: 'participant', id: p.id }, { missing, reason: body.data.reason });
+    return { ok: true, missing };
   });
 
   /**
