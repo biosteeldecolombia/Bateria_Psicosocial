@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { PermissionDef } from '@sanithelp/shared';
 import { api } from './api';
 import { Icon } from './icons';
 import { EmptyState, Modal, RowMenu, SelectAll, StatusBadge, useAction } from './ui';
@@ -87,23 +86,6 @@ function CampaignPicker({ campaigns, value, onChange }: { campaigns: CampaignLit
   );
 }
 
-/** Permisos vigentes del rol, leídos de la configuración actual (Usuarios → Roles y permisos). */
-function PermissionList({ role }: { role: UserRow['role'] }) {
-  const [info, setInfo] = useState<{ permissions: PermissionDef[]; matrix: Record<string, Record<string, boolean>> } | null>(null);
-  useEffect(() => { api('GET', '/api/admin/roles').then(setInfo).catch(() => undefined); }, []);
-  if (!info) return null;
-  const granted = role === 'admin' ? info.permissions : info.permissions.filter((p) => info.matrix[role]?.[p.key]);
-  return (
-    <>
-      <ul className="perm-list" aria-label={`Permisos del rol ${ROLE_LABEL[role]}`}>
-        {granted.map((p) => <li key={p.key}><Icon name="check" size={16} /> {p.label}</li>)}
-        {granted.length === 0 && <li className="muted">Sin permisos concedidos.</li>}
-      </ul>
-      <p className="muted"><small>Se cambian en «Roles y permisos». Todas las cuentas de personal exigen verificación en dos pasos, salvo la empresa cliente.</small></p>
-    </>
-  );
-}
-
 function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { companies: Company[]; campaigns: CampaignLite[]; user: UserRow | null; onDone: () => Promise<void>; onSecret: (title: string, username: string, password: string) => void; onClose: () => void }) {
   const act = useAction();
   const [role, setRole] = useState<UserRow['role']>(user?.role ?? 'psychologist');
@@ -184,9 +166,6 @@ function UserForm({ companies, campaigns, user, onDone, onSecret, onClose }: { c
         </div>
         <CompanyPicker role={role} companies={companies} value={ids} onChange={setIds} name="uf-co" />
         {role === 'assistant' && <CampaignPicker campaigns={campaigns} value={campIds} onChange={setCampIds} />}
-        <h3 className="sub">Permisos del rol</h3>
-        <PermissionList role={role} />
-        {user && <p className="muted">Si cambias el rol o el usuario, se cerrarán las sesiones abiertas de esta cuenta.</p>}
         <div className="dialog-actions">
           <button type="button" className="btn secondary" onClick={onClose}>Cancelar</button>
           <button className="btn" disabled={act.busy || fullName.trim().length < 2 || username.trim().length < 3 || (role === 'company' && !ids.length)}>
@@ -307,7 +286,7 @@ export function Users({ rows, loaded, companies, campaigns, reload, onSecret, op
                   <td><strong>{u.fullName || '—'}</strong></td>
                   <td><code>{u.username || '—'}</code>{u.email && <div className="muted">{u.email}</div>}</td>
                   <td><span className="chip"><Icon name={u.role === 'admin' ? 'shield' : u.role === 'psychologist' || u.role === 'assistant' ? 'user' : 'building'} size={14} /> {ROLE_LABEL[u.role]}</span></td>
-                  <td>{u.role === 'admin' ? 'Todas' : u.companies.length || u.campaigns?.length ? <>{u.companies.map((c) => c.name).join(', ')}{u.campaigns?.length ? <span className="muted">{u.companies.length ? ' · ' : ''}{u.campaigns.length} {u.campaigns.length === 1 ? 'campaña suelta' : 'campañas sueltas'}</span> : null}</> : <span className="muted">Sin asignar</span>}</td>
+                  <td>{u.role === 'admin' ? 'Todas' : u.companies.length || u.campaigns?.length ? <>{u.role !== 'company' && companies.length > 1 && companies.every((c) => u.companies.some((x) => x.id === c.id)) ? 'Todas' : u.companies.map((c) => c.name).join(', ')}{u.campaigns?.length ? <span className="muted">{u.companies.length ? ' · ' : ''}{u.campaigns.length} {u.campaigns.length === 1 ? 'campaña suelta' : 'campañas sueltas'}</span> : null}</> : <span className="muted">Sin asignar</span>}</td>
                   <td>
                     <StatusBadge on={u.active} onText="Activa" offText="Desactivada" />
                     {u.locked && <span className="badge warn"><Icon name="lock" size={12} /> Bloqueada</span>}

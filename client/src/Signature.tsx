@@ -6,30 +6,32 @@ import { Loading } from './BrandLoader';
 
 /** Reduce la imagen de la firma (máx. 800 × 300) y la devuelve como PNG o, si pesa demasiado, JPEG. */
 async function prepareSignature(file: File): Promise<string> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((ok, bad) => {
-      const i = new Image();
-      i.onload = () => ok(i);
-      i.onerror = () => bad(new Error('No se pudo leer la imagen. Usa un archivo PNG o JPG.'));
-      i.src = url;
-    });
-    const k = Math.min(1, 800 / img.width, 300 / img.height);
-    const c = document.createElement('canvas');
-    c.width = Math.max(1, Math.round(img.width * k));
-    c.height = Math.max(1, Math.round(img.height * k));
-    const ctx = c.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, c.width, c.height);
-    const png = c.toDataURL('image/png');
-    if (png.length < 500_000) return png;
-    // Fondo blanco para el JPEG (no admite transparencia)
-    ctx.globalCompositeOperation = 'destination-over';
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.85);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  // Se lee como data: (no blob:) porque la política de seguridad de la página solo permite imágenes del mismo sitio y data:.
+  const src = await new Promise<string>((ok, bad) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result));
+    r.onerror = () => bad(new Error('No se pudo leer el archivo. Intenta de nuevo.'));
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((ok, bad) => {
+    const i = new Image();
+    i.onload = () => ok(i);
+    i.onerror = () => bad(new Error('No se pudo leer la imagen. Usa un archivo PNG o JPG.'));
+    i.src = src;
+  });
+  const k = Math.min(1, 800 / img.width, 300 / img.height);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.width * k));
+  c.height = Math.max(1, Math.round(img.height * k));
+  const ctx = c.getContext('2d')!;
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  const png = c.toDataURL('image/png');
+  if (png.length < 500_000) return png;
+  // Fondo blanco para el JPEG (no admite transparencia)
+  ctx.globalCompositeOperation = 'destination-over';
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.85);
 }
 
 /**
