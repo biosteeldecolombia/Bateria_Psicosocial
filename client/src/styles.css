@@ -755,3 +755,33 @@ input[type='file']::file-selector-button:hover { border-color: var(--primary); }
 .dialog-head h2 .icon.bad { color: var(--danger); }
 input[type='checkbox']:indeterminate { background: var(--primary); border-color: var(--primary); }
 input[type='checkbox']:indeterminate::after { transform: scale(1); clip-path: polygon(0 40%, 100% 40%, 100% 62%, 0 62%); }
+
+/* ===== Tarjetas de empresa ===== */
+.co-card { display: flex; flex-direction: column; justify-content: space-between; height: 100%; border-radius: 18px; }
+.co-head { display: flex; align-items: flex-start; gap: 0.75rem; }
+.co-icon { display: inline-grid; place-content: center; flex: none; width: 2.5rem; height: 2.5rem; margin-top: 0.1rem; border-radius: 12px; background: var(--surface-2); color: var(--primary); }
+.co-title { flex: 1; min-width: 0; }
+.co-name { margin: 0; font-size: 1.05rem; line-height: 1.3; min-height: 2.7rem; overflow-wrap: anywhere; }
+.co-ids { margin: 0.15rem 0 0; font-size: 0.85rem; color: var(--muted); }
+.co-ids code { font-weight: 700; color: var(--text); }
+.co-card .head-actions { flex: none; gap: 0.15rem; }
+.co-card .badge { margin: 0; border-width: 1px; font-size: 0.8rem; padding: 0.1rem 0.6rem; }
+.co-card .badge.on { border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.co-card .head-actions .icon-btn { width: 2rem; height: 2rem; min-width: 2rem; min-height: 2rem; border-radius: 10px; }
+.co-card .head-actions .icon-btn:hover { background: var(--surface-2); }
+.co-card .facts { margin: 1rem 0; padding-top: 0.9rem; border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); gap: 0.2rem; }
+.co-card .facts > div { border-bottom: 0; align-items: center; padding: 0.35rem 0; }
+.co-open { display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.55rem; border-radius: 8px; font-size: 0.82rem; font-weight: 600; background: var(--surface-2); color: var(--muted); }
+.co-open.on { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+.co-psy { display: inline-flex; align-items: center; gap: 0.5rem; max-width: 100%; }
+.co-psy-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-avatar { display: inline-grid; place-content: center; flex: none; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 0.7rem; font-weight: 700; }
+.co-more { flex: none; padding: 0.05rem 0.5rem; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.co-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.co-actions .btn { border-radius: 12px; width: 100%; }
+
+/* Tabla de campañas: columnas con ancho suficiente para no partir los textos en tantas líneas */
+.table th.col-co, .table td.col-co { min-width: 13rem; }
+.table th.col-name, .table td.col-name { min-width: 12rem; }
+.table td .mini-kpis li { white-space: nowrap; }
+.toolbar .field.search .icon { top: auto; bottom: 0.85rem; transform: none; }

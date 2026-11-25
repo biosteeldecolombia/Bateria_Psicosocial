@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ASSESSMENTS, ASSESSMENT_IDS, consentDocsFor, consentVersionLabel, type AssessmentId, type MeResponse } from '@sanithelp/shared';
+import { ASSESSMENTS, ASSESSMENT_IDS, type AssessmentId, type MeResponse } from '@sanithelp/shared';
 import { api } from './api';
 import { Analysis } from './analysis/Analysis';
 import { SignatureEditor } from './Signature';
@@ -19,7 +19,7 @@ interface Campaign { id: string; companyId: string; name: string; status: 'open'
 
 /** Totales de respuestas de una campaña, visibles sin abrir los resultados. */
 function CampaignStats({ s }: { s: Campaign['stats'] }) {
-  const items: [number, string][] = [[s.started, 'con acceso iniciado'], [s.completed, 'completaron'], [s.inProgress, 'en curso'], [s.declined, 'no autorizaron']];
+  const items: [number, string][] = [[s.started, 'con acceso iniciado'], [s.completed, 'completaron'], [s.inProgress, 'en curso']];
   return (
     <ul className="mini-kpis" aria-label="Totales de respuestas">
       {items.map(([n, label]) => <li key={label}><strong>{n}</strong> {label}</li>)}
@@ -30,6 +30,17 @@ function CampaignStats({ s }: { s: Campaign['stats'] }) {
 type TabKey = 'inicio' | 'flujo' | 'empresas' | 'campanas' | 'usuarios' | 'auditoria' | 'configuracion' | 'formatos' | 'perfil';
 /** Aviso de formatos de evaluación por campaña: pendientes (psicóloga) o listos para descargar (auxiliar). */
 interface FormatoNote { campaignId: string; campaignName: string; companyName: string; kind: 'alturas' | 'confinados'; count: number }
+
+/** Nombre de empresa en formato título («BIO STEEL DE COLOMBIA S.A.S.» → «Bio Steel de Colombia S.A.S.»). Las siglas con puntos se conservan en mayúsculas. */
+function titleCase(name: string): string {
+  const small = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y', 'e', 'en']);
+  return name.trim().split(/\s+/).map((w, i) => {
+    if (w.includes('.') || /^\d/.test(w)) return w.toUpperCase();
+    const l = w.toLowerCase();
+    return i > 0 && small.has(l) ? l : l.charAt(0).toUpperCase() + l.slice(1);
+  }).join(' ');
+}
+const initialsOf = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase();
 
 /** Cambio de contraseña por la propia persona. Pide la actual y aplica la política de contraseñas; se hace en una ventana flotante. */
 function PasswordCard() {
@@ -378,29 +389,6 @@ function DeleteDialog({ title, warning, confirmName, blocked, onConfirm, onClose
   );
 }
 
-/** Consentimiento que aplica a una campaña según sus evaluaciones (para que la psicóloga lo vea). */
-function ConsentModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
-  const docs = consentDocsFor(campaign.assessments);
-  return (
-    <Modal title={`Consentimiento de ${campaign.name}`} icon="shield" onClose={onClose}>
-      <p className="muted">Código {consentVersionLabel(docs)}. {docs.length > 1 ? 'La persona ve los dos documentos y toma una sola decisión.' : ''}</p>
-      <div className="doc" role="region" aria-label="Texto del consentimiento" tabIndex={0}>
-        {docs.map((d) => (
-          <div key={d.id}>
-            {d.header && <ConsentHeader header={d.header} />}
-            <p><strong>{d.title}</strong></p>
-            {d.blocks.map((b, i) => {
-              const text = b.text.replace('{empresa}', campaign.companyName);
-              return b.kind === 'h' ? <h2 key={i}>{text}</h2> : b.kind === 'li' ? <ul key={i}><li>{text}</li></ul> : <p key={i}>{text}</p>;
-            })}
-          </div>
-        ))}
-      </div>
-      <div className="dialog-actions"><button type="button" className="btn secondary" onClick={onClose}>Cerrar</button></div>
-    </Modal>
-  );
-}
-
 function CampaignForm({ companies, initialCompany, onDone, onSecret, onClose }: { companies: Company[]; initialCompany: string; onDone: () => Promise<void>; onSecret: (s: Secret) => void; onClose: () => void }) {
   const act = useAction();
   const [companyId, setCompanyId] = useState(initialCompany || companies[0]?.id || '');
@@ -483,7 +471,6 @@ export function Management({ me }: { me: MeResponse }) {
   const [loaded, setLoaded] = useState(false);
   const [secret, setSecret] = useState<Secret | null>(null);
   const [analysis, setAnalysis] = useState<Campaign | null>(null);
-  const [consentView, setConsentView] = useState<Campaign | null>(null);
   const [profileDone, setProfileDone] = useState(true);
   // Avisos de formatos de evaluación: pendientes (psicóloga) o listos para descargar (auxiliar)
   const [notes, setNotes] = useState<FormatoNote[]>([]);
@@ -498,6 +485,7 @@ export function Management({ me }: { me: MeResponse }) {
   const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
   const [delCampaign, setDelCampaign] = useState<Campaign | null>(null);
   const [coFilter, setCoFilter] = useState('');
+  const [campQuery, setCampQuery] = useState('');
   const [stFilter, setStFilter] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const act = useAction();
@@ -574,7 +562,8 @@ export function Management({ me }: { me: MeResponse }) {
     ...(canUsers ? [{ key: 'usuarios' as const, icon: 'users' as const, value: activeUsers.length, label: 'Usuarios activos', hint: `${users.length} cuentas`, add: { label: 'Nueva cuenta', onClick: () => { setTab('usuarios'); setNewUser(true); } } }] : []),
   ];
 
-  const shownCampaigns = campaigns.filter((c) => (!coFilter || c.companyId === coFilter) && (!stFilter || c.status === stFilter));
+  const norm = (t: string) => t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const shownCampaigns = campaigns.filter((c) => (!coFilter || c.companyId === coFilter) && (!stFilter || c.status === stFilter) && (!campQuery.trim() || norm(c.name).includes(norm(campQuery.trim()))));
   const shownCompanies = companies.filter((c) => showInactive || c.active);
 
   return (
@@ -710,8 +699,12 @@ export function Management({ me }: { me: MeResponse }) {
                   const team = users.filter((u) => u.role === 'psychologist' && u.companies.some((x) => x.id === c.id));
                   return (
                     <article className="panel pad co-card" key={c.id}>
-                      <div className="panel-head">
-                        <h2 className="panel-title"><Icon name="building" size={20} /> {c.name}</h2>
+                      <div className="co-head">
+                        <span className="co-icon" aria-hidden="true"><Icon name="building" size={20} /></span>
+                        <div className="co-title">
+                          <h2 className="co-name">{titleCase(c.name)}</h2>
+                          <p className="co-ids"><code>{c.code}</code>{c.nit ? <><span aria-hidden="true"> · </span>NIT {c.nit}</> : null}</p>
+                        </div>
                         <span className="head-actions">
                           <StatusBadge on={c.active} onText="Activa" offText="Inactiva" />
                           {canCompanies && (
@@ -734,12 +727,23 @@ export function Management({ me }: { me: MeResponse }) {
                         </span>
                       </div>
                       <dl className="facts">
-                        <div><dt>Código</dt><dd><code>{c.code}</code></dd></div>
-                        <div><dt>NIT</dt><dd>{c.nit || '—'}</dd></div>
-                        <div><dt>Campañas</dt><dd>{cps.length} ({cps.filter((x) => x.status === 'open').length} abiertas)</dd></div>
-                        {isAdmin && <div><dt>Psicólogas</dt><dd>{team.length ? team.map((u) => u.fullName).join(', ') : 'Sin asignar'}</dd></div>}
+                        <div><dt>Campañas</dt><dd>{cps.length} <span className={`co-open${cps.filter((x) => x.status === 'open').length > 0 ? ' on' : ''}`}>{cps.filter((x) => x.status === 'open').length} {cps.filter((x) => x.status === 'open').length === 1 ? 'abierta' : 'abiertas'}</span></dd></div>
+                        {isAdmin && (
+                          <div>
+                            <dt>{team.length > 1 ? 'Psicólogas' : 'Psicóloga'}</dt>
+                            <dd>
+                              {team.length ? (
+                                <span className="co-psy">
+                                  <span className="co-avatar" aria-hidden="true">{initialsOf(team[0]!.fullName)}</span>
+                                  <span className="co-psy-name">{team[0]!.fullName}</span>
+                                  {team.length > 1 && <span className="co-more" title={team.slice(1).map((u) => u.fullName).join(', ')}>+{team.length - 1}</span>}
+                                </span>
+                              ) : <span className="muted">Sin asignar</span>}
+                            </dd>
+                          </div>
+                        )}
                       </dl>
-                      <div className="dialog-actions" style={{ justifyContent: 'flex-start' }}>
+                      <div className="co-actions">
                         <button className="btn secondary sm" onClick={() => goCampaigns(c.id)}>Ver campañas <Icon name="arrow" /></button>
                         <button className="btn sm" disabled={!c.active} onClick={() => { setCoFilter(c.id); setNewCampaign(true); }}><Icon name="plus" /> Campaña</button>
                       </div>
@@ -778,6 +782,11 @@ export function Management({ me }: { me: MeResponse }) {
                   <option value="closed">Cerradas</option>
                 </select>
               </div>
+              <div className="field grow search">
+                <label htmlFor="f-q">Buscar campaña</label>
+                <input id="f-q" type="search" placeholder="Nombre de la campaña" value={campQuery} onChange={(e) => setCampQuery(e.target.value)} autoComplete="off" />
+                <Icon name="search" size={18} />
+              </div>
             </div>
             {!loaded ? <Loading /> : shownCampaigns.length === 0 ? (
               <EmptyState icon="clipboard" text={isAssistant && campaigns.length === 0 ? 'No tienes campañas asignadas. Pídele al administrador que te asigne empresas o campañas.' : 'No hay campañas que coincidan.'}>{companies.length > 0 && <button className="btn" onClick={() => setNewCampaign(true)}><Icon name="plus" /> Nueva campaña</button>}</EmptyState>
@@ -785,18 +794,16 @@ export function Management({ me }: { me: MeResponse }) {
               <div className="panel table-wrap">
                 <table className="table">
                   <caption className="sr-only">Campañas y su credencial de acceso</caption>
-                  <thead><tr><th scope="col">Empresa</th><th scope="col">Campaña</th><th scope="col">Evaluaciones</th><th scope="col">Usuario de acceso</th><th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+                  <thead><tr><th scope="col" className="col-co">Empresa</th><th scope="col" className="col-name">Campaña</th><th scope="col">Evaluaciones</th><th scope="col">Respuestas</th><th scope="col">Estado</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
                   <tbody>
                     {shownCampaigns.map((c) => (
                       <tr key={c.id}>
-                        <td>{c.companyName}</td>
-                        <td><strong>{c.name}</strong></td>
+                        <td className="col-co">{c.companyName}</td>
+                        <td className="col-name"><strong>{c.name}</strong></td>
                         <td>
                           {c.assessments.map((a) => <span key={a} className="chip">{ASSESSMENTS[a as AssessmentId]?.title ?? a}</span>)}
                           <div className="muted"><small>Responsable: {c.responsibleName ?? 'la asignada a la empresa'}</small></div>
-                          <div className="muted"><small>Consentimiento: {consentDocsFor(c.assessments).map((d) => d.label).join(' + ')}</small> <button type="button" className="btn secondary sm" onClick={() => setConsentView(c)}>Ver</button></div>
                         </td>
-                        <td><code>{c.accessUsername}</code></td>
                         <td><CampaignStats s={c.stats} /></td>
                         <td><StatusBadge on={c.status === 'open'} onText="Abierta" offText="Cerrada" /></td>
                         <td className="actions">
@@ -895,7 +902,6 @@ export function Management({ me }: { me: MeResponse }) {
         />
       )}
       {editCampaign && <RenameCampaign key={editCampaign.id} campaign={editCampaign} onDone={load} onClose={() => setEditCampaign(null)} />}
-      {consentView && <ConsentModal campaign={consentView} onClose={() => setConsentView(null)} />}
       {delCampaign && (
         <DeleteDialog
           title={`Eliminar ${delCampaign.name}`}
